@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 7.0 - Motor de física real (Jolt)|Fase 7.0]] cerrada — siguiente es Fase 7.1 (oleaje y boyantez).** ([[Fase 6 - Gobiernos|Fase 6]] aplazada; el resto de [[Fase 7 - Entorno|Fase 7]] pausado hasta tener la física real construida — a petición del usuario.)
+**Fase actual: [[Fase 7.1 - Oleaje y boyantez|Fase 7.1]] — en curso (definida, sin implementar todavía).** ([[Fase 6 - Gobiernos|Fase 6]] aplazada; el resto de [[Fase 7 - Entorno|Fase 7]] pausado hasta tener la física real construida — a petición del usuario.)
 
 ## Fase 0 — cerrada
 
@@ -54,7 +54,7 @@ Definition of Done confirmada por el usuario jugando en directo. Ver detalle com
 
 ## Siguiente paso
 
-Fase 7.1 (oleaje y boyantez de verdad, a definir) — campo de olas tipo Gerstner y fuerzas de flotación reales sobre el rigid body. Solo después se retoma el resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones, demanda energética).
+[[Fase 7.1 - Oleaje y boyantez]] — definida, pendiente de implementar: campo de olas Gerstner (2-3 olas superpuestas) compartido entre muestreo físico y render, malla de agua real desplazada por vértice, boyantez muestreada en 4+ puntos del casco (cabeceo/balanceo reales), y relajar los grados de libertad del barco a los 6 completos. Solo después se retoma el resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones, demanda energética).
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 

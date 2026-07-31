@@ -35,4 +35,4 @@ Insertada a petición explícita del usuario: quiere oleaje y boyantez de verdad
 
 Con estos valores: el jugador maneja bien (giro realista y pesado, como un barco de verdad), y los barcos de la IA completan el ciclo recogida→entrega→venta sin perderse ni chocar.
 
-Anterior: [[Fase 5 - Primera empresa de IA]] (con [[Fase 6 - Gobiernos|Fase 6]] aplazada). Siguiente: Fase 7.1 — Oleaje y boyantez.
+Anterior: [[Fase 5 - Primera empresa de IA]] (con [[Fase 6 - Gobiernos|Fase 6]] aplazada). Siguiente: [[Fase 7.1 - Oleaje y boyantez]].
