@@ -11,7 +11,16 @@ find_package(imgui CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 find_package(Jolt CONFIG REQUIRED)
 
-add_executable(archipelago_sim src/main.cpp)
+add_executable(archipelago_sim
+    src/main.cpp
+    src/economy.cpp
+    src/jolt_world.cpp
+    src/render.cpp
+    src/replay.cpp
+    src/save_load.cpp
+    src/ship.cpp
+    src/simulation.cpp
+)
 
 target_link_libraries(archipelago_sim PRIVATE
     SDL3::SDL3
