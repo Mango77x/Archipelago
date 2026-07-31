@@ -4,6 +4,7 @@
   "dependencies": [
     "sdl3",
     "glew",
+    "glm",
     {
       "name": "imgui",
       "features": ["sdl3-binding", "opengl3-binding"]

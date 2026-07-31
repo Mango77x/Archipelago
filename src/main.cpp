@@ -5,6 +5,10 @@
 #include <imgui_impl_opengl3.h>
 #include <imgui_impl_sdl3.h>
 
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -219,10 +223,13 @@ private:
     double totalExpenses_ = 0.0;
 };
 
-struct Vec2 {
-    float x = 0.0f;
-    float y = 0.0f;
-};
+// World positions live in 3D now (Fase 4.5): X/Z is the horizontal plane
+// ships and islands sit on (matching the old 2D X/Y), Y is height/altitude —
+// always 0 for this phase (nothing flies yet), but no longer hardcoded out of
+// the data model. Rendering is the only thing that actually needed 3D; the
+// economy/logistics logic underneath doesn't care (principle 2: los gráficos
+// visualizan la simulación, no la sustituyen).
+using Vec3 = glm::vec3;
 
 // Wraps an angle (radians) to (-pi, pi]. Used to find the shortest turn
 // direction toward a target heading.
@@ -232,10 +239,16 @@ float NormalizeAngle(float angle) {
     return angle;
 }
 
-// Player-piloted (or autopiloted) cargo ship: simple 2D kinematic model
-// (thrust + drag + angular inertia), not a physics engine — enough to feel
-// like a boat without pulling in Jolt before the gameplay actually needs
-// collisions (see CLAUDE.md / vault).
+float HorizontalDistance(const Vec3& a, const Vec3& b) {
+    float dx = a.x - b.x;
+    float dz = a.z - b.z;
+    return std::sqrt(dx * dx + dz * dz);
+}
+
+// Player-piloted (or autopiloted) cargo ship: simple kinematic model (thrust
+// + drag + angular inertia) on the X/Z plane, not a physics engine — enough
+// to feel like a boat without pulling in Jolt before the gameplay actually
+// needs collisions (see CLAUDE.md / vault).
 //
 // Loading/unloading is purely proximity + cargo-state driven: the ship reacts
 // to whichever island dock it's physically at and whatever it's currently
@@ -249,7 +262,7 @@ public:
     // Public so rendering can draw the same zone the simulation actually uses.
     static constexpr float kDockRadius = 40.0f;
 
-    CargoShip(int capacity, Vec2 startPos, RouteKind routeKind)
+    CargoShip(int capacity, Vec3 startPos, RouteKind routeKind)
         : capacity_(capacity), position_(startPos), routeKind_(routeKind) {}
 
     // Takes resolved intent flags rather than raw SDL key state, so the same
@@ -262,11 +275,11 @@ public:
 
         if (thrustForward) {
             velocity_.x += std::cos(heading_) * kThrust * dt;
-            velocity_.y += std::sin(heading_) * kThrust * dt;
+            velocity_.z += std::sin(heading_) * kThrust * dt;
         }
         if (thrustBackward) {
             velocity_.x -= std::cos(heading_) * kThrust * dt;
-            velocity_.y -= std::sin(heading_) * kThrust * dt;
+            velocity_.z -= std::sin(heading_) * kThrust * dt;
         }
         if (turnLeft) angularVelocity_ -= kTurnRate * dt;
         if (turnRight) angularVelocity_ += kTurnRate * dt;
@@ -283,23 +296,23 @@ public:
     // (thrust opposing current velocity) whenever it's going faster than
     // that — otherwise it reaches the dock at full speed and skids/overshoots
     // trying to correct, which looked wrong in testing.
-    void AutoPilot(float dt, Vec2 island1Dock, Vec2 island2Dock, Vec2 island3Dock) {
+    void AutoPilot(float dt, Vec3 island1Dock, Vec3 island2Dock, Vec3 island3Dock) {
         constexpr float kThrust = 220.0f;
         constexpr float kTurnRate = 2.5f;
         constexpr float kAngleThreshold = 0.15f;
         constexpr float kThrustAngleLimit = 1.2f;
         constexpr float kBrakingDistance = 260.0f;
 
-        Vec2 origin = (routeKind_ == RouteKind::IronRoute) ? island1Dock : island2Dock;
-        Vec2 destination = (routeKind_ == RouteKind::IronRoute) ? island2Dock : island3Dock;
-        Vec2 target = (cargo_ <= 0) ? origin : destination;
+        Vec3 origin = (routeKind_ == RouteKind::IronRoute) ? island1Dock : island2Dock;
+        Vec3 destination = (routeKind_ == RouteKind::IronRoute) ? island2Dock : island3Dock;
+        Vec3 target = (cargo_ <= 0) ? origin : destination;
 
         float dx = target.x - position_.x;
-        float dy = target.y - position_.y;
-        float distance = std::sqrt(dx * dx + dy * dy);
+        float dz = target.z - position_.z;
+        float distance = std::sqrt(dx * dx + dz * dz);
         if (distance < 1.0f) return;
 
-        float desiredHeading = std::atan2(dy, dx);
+        float desiredHeading = std::atan2(dz, dx);
         float angleDiff = NormalizeAngle(desiredHeading - heading_);
 
         if (angleDiff > kAngleThreshold) {
@@ -308,7 +321,7 @@ public:
             angularVelocity_ -= kTurnRate * dt;
         }
 
-        float speed = std::sqrt(velocity_.x * velocity_.x + velocity_.y * velocity_.y);
+        float speed = std::sqrt(velocity_.x * velocity_.x + velocity_.z * velocity_.z);
         float desiredSpeed = kMaxSpeed * std::min(1.0f, distance / kBrakingDistance);
 
         if (speed > desiredSpeed) {
@@ -316,11 +329,11 @@ public:
             if (speed > 0.01f) {
                 float scale = newSpeed / speed;
                 velocity_.x *= scale;
-                velocity_.y *= scale;
+                velocity_.z *= scale;
             }
         } else if (std::abs(angleDiff) < kThrustAngleLimit) {
             velocity_.x += std::cos(heading_) * kThrust * dt;
-            velocity_.y += std::sin(heading_) * kThrust * dt;
+            velocity_.z += std::sin(heading_) * kThrust * dt;
         }
     }
 
@@ -330,22 +343,22 @@ public:
     // player's ship always passes isBot=false: a human pilot can dock
     // anywhere and load whatever's there, no restriction.
     void Update(float dt, Warehouse& island1Warehouse, Warehouse& island2Warehouse, Market& market,
-                Economy& economy, Port& port, Vec2 island1Dock, Vec2 island2Dock, Vec2 island3Dock, bool isBot) {
+                Economy& economy, Port& port, Vec3 island1Dock, Vec3 island2Dock, Vec3 island3Dock, bool isBot) {
         constexpr float kLinearDrag = 0.6f;
         constexpr float kAngularDrag = 0.85f;
 
         velocity_.x *= std::pow(1.0f - kLinearDrag, dt);
-        velocity_.y *= std::pow(1.0f - kLinearDrag, dt);
+        velocity_.z *= std::pow(1.0f - kLinearDrag, dt);
         angularVelocity_ *= std::pow(1.0f - kAngularDrag, dt);
 
-        float speed = std::sqrt(velocity_.x * velocity_.x + velocity_.y * velocity_.y);
+        float speed = std::sqrt(velocity_.x * velocity_.x + velocity_.z * velocity_.z);
         if (speed > kMaxSpeed) {
             velocity_.x = velocity_.x / speed * kMaxSpeed;
-            velocity_.y = velocity_.y / speed * kMaxSpeed;
+            velocity_.z = velocity_.z / speed * kMaxSpeed;
         }
 
         position_.x += velocity_.x * dt;
-        position_.y += velocity_.y * dt;
+        position_.z += velocity_.z * dt;
         heading_ += angularVelocity_ * dt;
 
         // For bots, routeKind_ is a hold configuration, not just a steering
@@ -359,7 +372,7 @@ public:
         bool canHandleSteel = !isBot || routeKind_ == RouteKind::SteelRoute;
 
         // Isla 1 (Mina): pick up Iron if the hold is empty.
-        if (canHandleIron && cargo_ <= 0 && Distance(position_, island1Dock) <= kDockRadius) {
+        if (canHandleIron && cargo_ <= 0 && HorizontalDistance(position_, island1Dock) <= kDockRadius) {
             int available = island1Warehouse.Get(Resource::Iron);
             int amount = std::min(available, capacity_);
             if (amount > 0) {
@@ -371,7 +384,7 @@ public:
         }
 
         // Isla 2 (Aceria): deliver Iron if carrying it; otherwise pick up Steel if empty.
-        if (Distance(position_, island2Dock) <= kDockRadius) {
+        if (HorizontalDistance(position_, island2Dock) <= kDockRadius) {
             if (cargo_ > 0 && cargoResource_ == Resource::Iron) {
                 island2Warehouse.Deposit(Resource::Iron, cargo_);
                 std::cout << "Cargo Ship delivered " << cargo_ << " Iron at Isla 2\n";
@@ -389,7 +402,8 @@ public:
         }
 
         // Isla 3 (Puerto): sell Steel.
-        if (cargo_ > 0 && cargoResource_ == Resource::Steel && Distance(position_, island3Dock) <= kDockRadius) {
+        if (cargo_ > 0 && cargoResource_ == Resource::Steel &&
+            HorizontalDistance(position_, island3Dock) <= kDockRadius) {
             double revenue = market.Sell(cargo_);
             economy.AddRevenue(revenue);
             port.Export(cargo_);
@@ -398,21 +412,15 @@ public:
         }
     }
 
-    static float Distance(Vec2 a, Vec2 b) {
-        float dx = a.x - b.x;
-        float dy = a.y - b.y;
-        return std::sqrt(dx * dx + dy * dy);
-    }
-
-    Vec2 position() const { return position_; }
-    Vec2 velocity() const { return velocity_; }
+    Vec3 position() const { return position_; }
+    Vec3 velocity() const { return velocity_; }
     float heading() const { return heading_; }
     float angularVelocity() const { return angularVelocity_; }
     int cargo() const { return cargo_; }
     Resource cargoResource() const { return cargoResource_; }
     RouteKind routeKind() const { return routeKind_; }
 
-    void SetState(Vec2 position, Vec2 velocity, float heading, float angularVelocity, int cargo,
+    void SetState(Vec3 position, Vec3 velocity, float heading, float angularVelocity, int cargo,
                   Resource cargoResource) {
         position_ = position;
         velocity_ = velocity;
@@ -426,8 +434,8 @@ private:
     static constexpr float kMaxSpeed = 160.0f;
 
     int capacity_;
-    Vec2 position_;
-    Vec2 velocity_;
+    Vec3 position_;
+    Vec3 velocity_{0.0f, 0.0f, 0.0f};
     float heading_ = 0.0f;
     float angularVelocity_ = 0.0f;
     int cargo_ = 0;
@@ -470,7 +478,7 @@ bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const War
 // second — a human can open this file and see exactly what broke. ---
 
 constexpr const char* kSaveFile = "archipelago_save.txt";
-constexpr const char* kSaveHeader = "ARCHIPELAGO_SAVE_V3";
+constexpr const char* kSaveHeader = "ARCHIPELAGO_SAVE_V4";
 
 void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const SteelMill& mill,
               const Warehouse& island1Warehouse, const Warehouse& island2Warehouse,
@@ -491,11 +499,11 @@ void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const Stee
     out << economy.cash() << " " << economy.totalExpenses() << "\n";
     out << ships.size() << "\n";
     for (const CargoShip& s : ships) {
-        Vec2 pos = s.position();
-        Vec2 vel = s.velocity();
-        out << pos.x << " " << pos.y << " " << vel.x << " " << vel.y << " " << s.heading() << " "
-            << s.angularVelocity() << " " << s.cargo() << " " << static_cast<int>(s.cargoResource()) << " "
-            << static_cast<int>(s.routeKind()) << "\n";
+        Vec3 pos = s.position();
+        Vec3 vel = s.velocity();
+        out << pos.x << " " << pos.y << " " << pos.z << " " << vel.x << " " << vel.y << " " << vel.z << " "
+            << s.heading() << " " << s.angularVelocity() << " " << s.cargo() << " "
+            << static_cast<int>(s.cargoResource()) << " " << static_cast<int>(s.routeKind()) << "\n";
     }
     std::cout << "Game saved to " << kSaveFile << " (hour " << hour << ", " << ships.size() << " ships)\n";
 }
@@ -538,13 +546,13 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
 
     std::vector<CargoShip> loadedShips;
     for (size_t i = 0; i < shipCount && in; ++i) {
-        Vec2 pos{}, vel{};
+        Vec3 pos{}, vel{};
         float heading = 0.0f, angularVelocity = 0.0f;
         int cargo = 0;
         int cargoResourceInt = 0;
         int routeKindInt = 0;
-        in >> pos.x >> pos.y >> vel.x >> vel.y >> heading >> angularVelocity >> cargo >> cargoResourceInt >>
-            routeKindInt;
+        in >> pos.x >> pos.y >> pos.z >> vel.x >> vel.y >> vel.z >> heading >> angularVelocity >> cargo >>
+            cargoResourceInt >> routeKindInt;
 
         RouteKind kind =
             (routeKindInt == static_cast<int>(RouteKind::IronRoute)) ? RouteKind::IronRoute : RouteKind::SteelRoute;
@@ -644,7 +652,10 @@ bool LoadReplay(std::vector<ReplayFrame>& frames) {
     return true;
 }
 
-// --- Rendering (placeholder: flat-colored quads/triangle, throwaway per Fase 1) ---
+// --- Rendering: real 3D now (Fase 4.5) — perspective projection, depth
+// testing, simple box/hull geometry. Still placeholder shapes (no imported
+// models, no lighting) — fidelity stays last priority, but it's a real 3D
+// space now, not a 2D trick. ---
 
 GLuint CompileShader(GLenum type, const char* source) {
     GLuint shader = glCreateShader(type);
@@ -660,12 +671,15 @@ GLuint CompileShader(GLenum type, const char* source) {
     return shader;
 }
 
-GLuint CreateShaderProgram() {
+// Flat, unlit color — used only for the dock rings (line loops have no faces
+// to shade against a light).
+GLuint CreateUnlitShaderProgram() {
     static const char* kVertexSrc = R"(
         #version 330 core
-        layout (location = 0) in vec2 aPos;
+        layout (location = 0) in vec3 aPos;
+        uniform mat4 uMVP;
         void main() {
-            gl_Position = vec4(aPos, 0.0, 1.0);
+            gl_Position = uMVP * vec4(aPos, 1.0);
         }
     )";
     static const char* kFragmentSrc = R"(
@@ -694,74 +708,164 @@ GLuint CreateShaderProgram() {
     return program;
 }
 
-// World space is no longer the same thing as screen space (Fase 4): islands
-// are thousands of units apart, so everything is drawn relative to a camera
-// that follows the player's ship. Camera position maps to the center of the
-// screen.
-Vec2 ToNdc(Vec2 worldPos, Vec2 cameraPos) {
-    float relX = worldPos.x - cameraPos.x;
-    float relY = worldPos.y - cameraPos.y;
-    return {relX / (kWindowWidth * 0.5f), -(relY / (kWindowHeight * 0.5f))};
+// Simple directional (Lambertian) shading for boxes — one "sun", no shadows,
+// no textures. Cheap enough to add now (no new assets, just per-vertex
+// normals + a dot product) and it already reads much better as solid objects
+// than flat unlit color. Real lighting/materials/shadows stay deferred —
+// this is one rung up the ladder, not the top of it.
+GLuint CreateLitShaderProgram() {
+    static const char* kVertexSrc = R"(
+        #version 330 core
+        layout (location = 0) in vec3 aPos;
+        layout (location = 1) in vec3 aNormal;
+        uniform mat4 uMVP;
+        uniform mat3 uNormalMatrix;
+        out vec3 vNormal;
+        void main() {
+            vNormal = uNormalMatrix * aNormal;
+            gl_Position = uMVP * vec4(aPos, 1.0);
+        }
+    )";
+    static const char* kFragmentSrc = R"(
+        #version 330 core
+        in vec3 vNormal;
+        uniform vec3 uColor;
+        uniform vec3 uLightDir;  // direction the light travels (sun -> surface)
+        out vec4 FragColor;
+        void main() {
+            vec3 n = normalize(vNormal);
+            float diff = max(dot(n, -uLightDir), 0.0);
+            vec3 ambient = 0.35 * uColor;
+            vec3 diffuse = 0.65 * uColor * diff;
+            FragColor = vec4(ambient + diffuse, 1.0);
+        }
+    )";
+    GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertexSrc);
+    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, kFragmentSrc);
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glLinkProgram(program);
+    GLint success = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+        std::cerr << "Program link error: " << log << "\n";
+    }
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    return program;
 }
 
-ImVec2 WorldToScreen(Vec2 worldPos, Vec2 cameraPos) {
-    return ImVec2((worldPos.x - cameraPos.x) + kWindowWidth * 0.5f, (worldPos.y - cameraPos.y) + kWindowHeight * 0.5f);
-}
+// Unit cube, centered at origin, extents -0.5..0.5. Reused (scaled +
+// translated + rotated via the model matrix) for every box-shaped thing:
+// island buildings, the ship hull, and the water plane (scaled flat and huge).
+// 36 vertices, unindexed triangles, position + per-face normal interleaved.
+constexpr float kCubeVertices[] = {
+    // -Z face (normal 0,0,-1)
+    -0.5f, -0.5f, -0.5f, 0, 0, -1,  0.5f, -0.5f, -0.5f, 0, 0, -1,  0.5f, 0.5f, -0.5f, 0, 0, -1,
+    0.5f, 0.5f, -0.5f, 0, 0, -1,  -0.5f, 0.5f, -0.5f, 0, 0, -1,  -0.5f, -0.5f, -0.5f, 0, 0, -1,
+    // +Z face (normal 0,0,1)
+    -0.5f, -0.5f, 0.5f, 0, 0, 1,  0.5f, -0.5f, 0.5f, 0, 0, 1,  0.5f, 0.5f, 0.5f, 0, 0, 1,
+    0.5f, 0.5f, 0.5f, 0, 0, 1,  -0.5f, 0.5f, 0.5f, 0, 0, 1,  -0.5f, -0.5f, 0.5f, 0, 0, 1,
+    // -X face (normal -1,0,0)
+    -0.5f, 0.5f, 0.5f, -1, 0, 0,  -0.5f, 0.5f, -0.5f, -1, 0, 0,  -0.5f, -0.5f, -0.5f, -1, 0, 0,
+    -0.5f, -0.5f, -0.5f, -1, 0, 0,  -0.5f, -0.5f, 0.5f, -1, 0, 0,  -0.5f, 0.5f, 0.5f, -1, 0, 0,
+    // +X face (normal 1,0,0)
+    0.5f, 0.5f, 0.5f, 1, 0, 0,  0.5f, 0.5f, -0.5f, 1, 0, 0,  0.5f, -0.5f, -0.5f, 1, 0, 0,
+    0.5f, -0.5f, -0.5f, 1, 0, 0,  0.5f, -0.5f, 0.5f, 1, 0, 0,  0.5f, 0.5f, 0.5f, 1, 0, 0,
+    // -Y face (normal 0,-1,0)
+    -0.5f, -0.5f, -0.5f, 0, -1, 0,  0.5f, -0.5f, -0.5f, 0, -1, 0,  0.5f, -0.5f, 0.5f, 0, -1, 0,
+    0.5f, -0.5f, 0.5f, 0, -1, 0,  -0.5f, -0.5f, 0.5f, 0, -1, 0,  -0.5f, -0.5f, -0.5f, 0, -1, 0,
+    // +Y face (normal 0,1,0)
+    -0.5f, 0.5f, -0.5f, 0, 1, 0,  0.5f, 0.5f, -0.5f, 0, 1, 0,  0.5f, 0.5f, 0.5f, 0, 1, 0,
+    0.5f, 0.5f, 0.5f, 0, 1, 0,  -0.5f, 0.5f, 0.5f, 0, 1, 0,  -0.5f, 0.5f, -0.5f, 0, 1, 0,
+};
+constexpr int kCubeVertexCount = 36;
+constexpr int kCubeFloatsPerVertex = 6;  // position (3) + normal (3)
 
-void DrawQuad(GLuint vao, GLuint vbo, Vec2 center, float halfW, float halfH, float r, float g, float b,
-              GLint colorLoc, Vec2 cameraPos) {
-    Vec2 c0 = ToNdc({center.x - halfW, center.y - halfH}, cameraPos);
-    Vec2 c1 = ToNdc({center.x + halfW, center.y - halfH}, cameraPos);
-    Vec2 c2 = ToNdc({center.x + halfW, center.y + halfH}, cameraPos);
-    Vec2 c3 = ToNdc({center.x - halfW, center.y + halfH}, cameraPos);
-    float vertices[8] = {c0.x, c0.y, c1.x, c1.y, c2.x, c2.y, c3.x, c3.y};
+void DrawBox(GLuint cubeVao, GLint mvpLoc, GLint normalMatrixLoc, GLint colorLoc, const glm::mat4& viewProj,
+             Vec3 center, Vec3 fullExtents, float headingRadians, float r, float g, float b) {
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), center);
+    // Local +X is the model's "forward"; rotate by -heading so it lines up
+    // with the world-forward convention used everywhere else
+    // (cos(heading), 0, sin(heading)) — see CargoShip::ApplyInput.
+    model = glm::rotate(model, -headingRadians, glm::vec3(0.0f, 1.0f, 0.0f));
+    model = glm::scale(model, fullExtents);
+    glm::mat4 mvp = viewProj * model;
+    // Non-uniform scale (buildings/ship/water all have different extents per
+    // axis) means normals need the inverse-transpose, not the model matrix
+    // directly, or they'd skew and lighting would look wrong on stretched boxes.
+    glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(model)));
 
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, glm::value_ptr(mvp));
+    glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(normalMatrix));
     glUniform3f(colorLoc, r, g, b);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-}
-
-void DrawShipTriangle(GLuint vao, GLuint vbo, Vec2 center, float heading, float size, GLint colorLoc,
-                       Vec2 cameraPos) {
-    Vec2 tip = {center.x + std::cos(heading) * size, center.y + std::sin(heading) * size};
-    Vec2 back1 = {center.x + std::cos(heading + 2.6f) * size * 0.6f,
-                  center.y + std::sin(heading + 2.6f) * size * 0.6f};
-    Vec2 back2 = {center.x + std::cos(heading - 2.6f) * size * 0.6f,
-                  center.y + std::sin(heading - 2.6f) * size * 0.6f};
-    Vec2 p0 = ToNdc(tip, cameraPos);
-    Vec2 p1 = ToNdc(back1, cameraPos);
-    Vec2 p2 = ToNdc(back2, cameraPos);
-    float vertices[6] = {p0.x, p0.y, p1.x, p1.y, p2.x, p2.y};
-
-    glUniform3f(colorLoc, 0.9f, 0.9f, 0.2f);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(cubeVao);
+    glDrawArrays(GL_TRIANGLES, 0, kCubeVertexCount);
 }
 
 constexpr int kDockRingSegments = 32;
 
 // Marks the actual loading/unloading zone (the same radius Update() checks)
-// as a ring on the ground, so it's visible where a ship needs to be, not
-// just where the building sprite happens to sit.
-void DrawDockRing(GLuint vao, GLuint vbo, Vec2 center, float radius, GLint colorLoc, Vec2 cameraPos) {
-    float vertices[kDockRingSegments * 2];
+// as a ring on the water, so it's visible where a ship needs to be, not just
+// where the building happens to sit.
+void DrawDockRing(GLuint ringVao, GLuint ringVbo, GLint mvpLoc, GLint colorLoc, const glm::mat4& viewProj,
+                   Vec3 center, float radius) {
+    float vertices[kDockRingSegments * 3];
     for (int i = 0; i < kDockRingSegments; ++i) {
         float angle = (static_cast<float>(i) / kDockRingSegments) * 2.0f * kPi;
-        Vec2 worldPoint = {center.x + std::cos(angle) * radius, center.y + std::sin(angle) * radius};
-        Vec2 ndc = ToNdc(worldPoint, cameraPos);
-        vertices[i * 2 + 0] = ndc.x;
-        vertices[i * 2 + 1] = ndc.y;
+        vertices[i * 3 + 0] = center.x + std::cos(angle) * radius;
+        vertices[i * 3 + 1] = 1.0f;
+        vertices[i * 3 + 2] = center.z + std::sin(angle) * radius;
     }
 
+    glm::mat4 mvp = viewProj;  // vertices already in world space, model = identity
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, glm::value_ptr(mvp));
     glUniform3f(colorLoc, 1.0f, 1.0f, 1.0f);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBindVertexArray(ringVao);
+    glBindBuffer(GL_ARRAY_BUFFER, ringVbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
     glDrawArrays(GL_LINE_LOOP, 0, kDockRingSegments);
+}
+
+enum class CameraMode { ThirdPerson, FirstPerson };
+
+// Third person: chases behind and above the ship. First person: at the ship's
+// position, eye height, looking down its heading. Same forward-vector
+// convention as movement (cos(heading), 0, sin(heading)).
+glm::mat4 ComputeViewProj(CameraMode mode, Vec3 shipPos, float heading, float aspect) {
+    glm::vec3 forward(std::cos(heading), 0.0f, std::sin(heading));
+    glm::vec3 up(0.0f, 1.0f, 0.0f);
+    glm::vec3 eye, target;
+
+    if (mode == CameraMode::ThirdPerson) {
+        constexpr float kChaseDistance = 180.0f;
+        constexpr float kChaseHeight = 90.0f;
+        eye = shipPos - forward * kChaseDistance + up * kChaseHeight;
+        target = shipPos + up * 15.0f;
+    } else {
+        constexpr float kEyeHeight = 14.0f;
+        eye = shipPos + up * kEyeHeight;
+        target = eye + forward * 10.0f;
+    }
+
+    glm::mat4 view = glm::lookAt(eye, target, up);
+    glm::mat4 projection = glm::perspective(glm::radians(65.0f), aspect, 1.0f, 50000.0f);
+    return projection * view;
+}
+
+// Projects a world position through view*projection into screen pixel space,
+// for placing ImGui text labels over 3D objects. Returns false if the point
+// is behind the camera (label shouldn't be drawn).
+bool WorldToScreen(Vec3 worldPos, const glm::mat4& viewProj, ImVec2& outScreen) {
+    glm::vec4 clip = viewProj * glm::vec4(worldPos, 1.0f);
+    if (clip.w <= 0.001f) return false;
+    glm::vec3 ndc = glm::vec3(clip) / clip.w;
+    outScreen.x = (ndc.x * 0.5f + 0.5f) * kWindowWidth;
+    outScreen.y = (1.0f - (ndc.y * 0.5f + 0.5f)) * kWindowHeight;
+    return true;
 }
 
 }  // namespace archipelago
@@ -779,8 +883,10 @@ int main(int argc, char** argv) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-    SDL_Window* window = SDL_CreateWindow("Archipelago - Fase 4", kWindowWidth, kWindowHeight, SDL_WINDOW_OPENGL);
+    SDL_Window* window = SDL_CreateWindow("Archipelago - Fase 4.5 (3D)", kWindowWidth, kWindowHeight,
+                                           SDL_WINDOW_OPENGL);
     if (!window) {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
         return EXIT_FAILURE;
@@ -801,7 +907,8 @@ int main(int argc, char** argv) {
     }
 
     glViewport(0, 0, kWindowWidth, kWindowHeight);
-    glClearColor(0.05f, 0.15f, 0.25f, 1.0f);
+    glClearColor(0.55f, 0.75f, 0.95f, 1.0f);  // sky
+    glEnable(GL_DEPTH_TEST);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -809,17 +916,35 @@ int main(int argc, char** argv) {
     ImGui_ImplSDL3_InitForOpenGL(window, glContext);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    GLuint shaderProgram = CreateShaderProgram();
-    GLint colorLoc = glGetUniformLocation(shaderProgram, "uColor");
+    GLuint litShaderProgram = CreateLitShaderProgram();
+    GLint litColorLoc = glGetUniformLocation(litShaderProgram, "uColor");
+    GLint litMvpLoc = glGetUniformLocation(litShaderProgram, "uMVP");
+    GLint litNormalMatrixLoc = glGetUniformLocation(litShaderProgram, "uNormalMatrix");
+    GLint lightDirLoc = glGetUniformLocation(litShaderProgram, "uLightDir");
 
-    GLuint vao = 0;
-    GLuint vbo = 0;
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * kDockRingSegments * 2, nullptr, GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), reinterpret_cast<void*>(0));
+    GLuint unlitShaderProgram = CreateUnlitShaderProgram();
+    GLint unlitColorLoc = glGetUniformLocation(unlitShaderProgram, "uColor");
+    GLint unlitMvpLoc = glGetUniformLocation(unlitShaderProgram, "uMVP");
+
+    GLuint cubeVao = 0, cubeVbo = 0;
+    glGenVertexArrays(1, &cubeVao);
+    glGenBuffers(1, &cubeVbo);
+    glBindVertexArray(cubeVao);
+    glBindBuffer(GL_ARRAY_BUFFER, cubeVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(kCubeVertices), kCubeVertices, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, kCubeFloatsPerVertex * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, kCubeFloatsPerVertex * sizeof(float),
+                           reinterpret_cast<void*>(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+
+    GLuint ringVao = 0, ringVbo = 0;
+    glGenVertexArrays(1, &ringVao);
+    glGenBuffers(1, &ringVbo);
+    glBindVertexArray(ringVao);
+    glBindBuffer(GL_ARRAY_BUFFER, ringVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * kDockRingSegments * 3, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(0);
 
     // Isla 1 (Minera) -> Isla 2 (Industrial) -> Isla 3 (Portuaria). Real
@@ -829,7 +954,7 @@ int main(int argc, char** argv) {
     Warehouse island2Warehouse;
     island2Warehouse.Deposit(Resource::Iron, 30);  // small starting stockpile: mill isn't dead on turn one
     IronMine mine(/*rate=*/10);
-    mine.SetTotalProduced(30);  // matches the seeded stockpile below, so the balance invariant holds from tick 1
+    mine.SetTotalProduced(30);  // matches the seeded stockpile above, so the balance invariant holds from tick 1
     SteelMill mill(/*consumeRate=*/10, /*outputRatioPercent=*/50);
     Port port;
     Market market(/*basePrice=*/10.0, /*demandPerHour=*/12.0f, /*sensitivity=*/0.05);
@@ -839,17 +964,18 @@ int main(int argc, char** argv) {
     constexpr double kShipPurchaseCost = 500.0;
     constexpr int kShipCapacity = 20;
 
-    const Vec2 minePos{300, 300};
-    const Vec2 island1Dock{450, 300};
-    const Vec2 millPos{2200, 450};
-    const Vec2 island2Dock{2350, 450};
-    const Vec2 portPos{4300, 150};
-    const Vec2 island3Dock{4450, 150};
+    const Vec3 minePos{300, 0, 300};
+    const Vec3 island1Dock{450, 0, 300};
+    const Vec3 millPos{2200, 0, 450};
+    const Vec3 island2Dock{2350, 0, 450};
+    const Vec3 portPos{4300, 0, 150};
+    const Vec3 island3Dock{4450, 0, 150};
 
     std::vector<CargoShip> ships;
     ships.emplace_back(kShipCapacity, island2Dock, RouteKind::SteelRoute);
 
-    Vec2 cameraPos = ships[0].position();
+    CameraMode cameraMode = CameraMode::ThirdPerson;
+    bool cWasDown = false;
 
     Uint64 lastCounter = SDL_GetPerformanceCounter();
     const double frequency = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -884,6 +1010,12 @@ int main(int argc, char** argv) {
 
         const bool* keys = SDL_GetKeyboardState(nullptr);
         if (keys[SDL_SCANCODE_ESCAPE]) running = false;
+
+        bool cIsDown = keys[SDL_SCANCODE_C];
+        if (cIsDown && !cWasDown) {
+            cameraMode = (cameraMode == CameraMode::ThirdPerson) ? CameraMode::FirstPerson : CameraMode::ThirdPerson;
+        }
+        cWasDown = cIsDown;
 
         bool f5IsDown = keys[SDL_SCANCODE_F5];
         if (f5IsDown && !f5WasDown) {
@@ -1018,20 +1150,36 @@ int main(int argc, char** argv) {
             }
         }
 
-        cameraPos = ships[0].position();
+        float aspect = static_cast<float>(kWindowWidth) / static_cast<float>(kWindowHeight);
+        glm::mat4 viewProj = ComputeViewProj(cameraMode, ships[0].position(), ships[0].heading(), aspect);
 
-        glClear(GL_COLOR_BUFFER_BIT);
-        glUseProgram(shaderProgram);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glUseProgram(litShaderProgram);
+        glUniform3f(lightDirLoc, 0.4f, -1.0f, 0.3f);
 
-        DrawQuad(vao, vbo, minePos, 60, 40, 0.55f, 0.35f, 0.15f, colorLoc, cameraPos);
-        DrawQuad(vao, vbo, millPos, 60, 40, 0.5f, 0.5f, 0.55f, colorLoc, cameraPos);
-        DrawQuad(vao, vbo, portPos, 60, 40, 0.2f, 0.4f, 0.8f, colorLoc, cameraPos);
-        DrawDockRing(vao, vbo, island1Dock, CargoShip::kDockRadius, colorLoc, cameraPos);
-        DrawDockRing(vao, vbo, island2Dock, CargoShip::kDockRadius, colorLoc, cameraPos);
-        DrawDockRing(vao, vbo, island3Dock, CargoShip::kDockRadius, colorLoc, cameraPos);
-        for (const CargoShip& s : ships) {
-            DrawShipTriangle(vao, vbo, s.position(), s.heading(), 24.0f, colorLoc, cameraPos);
+        // Water: the same cube mesh, scaled flat and huge, centered to cover all three islands.
+        DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, Vec3{2500, -2, 300},
+                Vec3{20000, 4, 20000}, 0.0f, 0.15f, 0.35f, 0.55f);
+
+        DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, minePos + Vec3{0, 40, 0},
+                Vec3{120, 80, 80}, 0.0f, 0.55f, 0.35f, 0.15f);
+        DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, millPos + Vec3{0, 40, 0},
+                Vec3{120, 80, 80}, 0.0f, 0.5f, 0.5f, 0.55f);
+        DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, portPos + Vec3{0, 40, 0},
+                Vec3{120, 80, 80}, 0.0f, 0.2f, 0.4f, 0.8f);
+
+        for (size_t i = 0; i < ships.size(); ++i) {
+            const CargoShip& s = ships[i];
+            // Don't draw your own hull in first-person — you're standing inside it.
+            if (i == 0 && cameraMode == CameraMode::FirstPerson) continue;
+            DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, s.position() + Vec3{0, 8, 0},
+                    Vec3{48, 16, 24}, s.heading(), 0.9f, 0.9f, 0.2f);
         }
+
+        glUseProgram(unlitShaderProgram);
+        DrawDockRing(ringVao, ringVbo, unlitMvpLoc, unlitColorLoc, viewProj, island1Dock, CargoShip::kDockRadius);
+        DrawDockRing(ringVao, ringVbo, unlitMvpLoc, unlitColorLoc, viewProj, island2Dock, CargoShip::kDockRadius);
+        DrawDockRing(ringVao, ringVbo, unlitMvpLoc, unlitColorLoc, viewProj, island3Dock, CargoShip::kDockRadius);
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -1039,16 +1187,22 @@ int main(int argc, char** argv) {
 
         ImDrawList* labels = ImGui::GetForegroundDrawList();
         const ImU32 labelColor = IM_COL32(255, 255, 255, 255);
-        ImVec2 mineLabelPos = WorldToScreen(minePos, cameraPos);
-        ImVec2 millLabelPos = WorldToScreen(millPos, cameraPos);
-        ImVec2 portLabelPos = WorldToScreen(portPos, cameraPos);
-        labels->AddText(ImVec2(mineLabelPos.x - 55, mineLabelPos.y - 60), labelColor, "Isla 1: Mina de Hierro");
-        labels->AddText(ImVec2(millLabelPos.x - 45, millLabelPos.y - 60), labelColor, "Isla 2: Aceria");
-        labels->AddText(ImVec2(portLabelPos.x - 40, portLabelPos.y - 60), labelColor, "Isla 3: Puerto");
+        ImVec2 screenPos;
+        if (WorldToScreen(minePos + Vec3{0, 120, 0}, viewProj, screenPos)) {
+            labels->AddText(ImVec2(screenPos.x - 55, screenPos.y), labelColor, "Isla 1: Mina de Hierro");
+        }
+        if (WorldToScreen(millPos + Vec3{0, 120, 0}, viewProj, screenPos)) {
+            labels->AddText(ImVec2(screenPos.x - 45, screenPos.y), labelColor, "Isla 2: Aceria");
+        }
+        if (WorldToScreen(portPos + Vec3{0, 120, 0}, viewProj, screenPos)) {
+            labels->AddText(ImVec2(screenPos.x - 40, screenPos.y), labelColor, "Isla 3: Puerto");
+        }
 
         ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
         ImGui::Begin("Estado de la simulacion");
         ImGui::Text("Hora simulada: %d", hour);
+        ImGui::Text("Camara: %s (tecla C para cambiar)",
+                    cameraMode == CameraMode::ThirdPerson ? "tercera persona" : "primera persona");
         ImGui::Separator();
         ImGui::Text("Isla 1 (Minera) - Hierro: %d", island1Warehouse.Get(Resource::Iron));
         ImGui::Text("Isla 2 (Industrial) - Hierro: %d, Acero: %d", island2Warehouse.Get(Resource::Iron),
@@ -1117,9 +1271,12 @@ int main(int argc, char** argv) {
     std::cout << "Total expenses: $" << economy.totalExpenses() << "\n";
     std::cout << "Final cash: $" << economy.cash() << "\n";
 
-    glDeleteBuffers(1, &vbo);
-    glDeleteVertexArrays(1, &vao);
-    glDeleteProgram(shaderProgram);
+    glDeleteBuffers(1, &cubeVbo);
+    glDeleteVertexArrays(1, &cubeVao);
+    glDeleteBuffers(1, &ringVbo);
+    glDeleteVertexArrays(1, &ringVao);
+    glDeleteProgram(litShaderProgram);
+    glDeleteProgram(unlitShaderProgram);
     SDL_GL_DestroyContext(glContext);
     SDL_DestroyWindow(window);
     SDL_Quit();

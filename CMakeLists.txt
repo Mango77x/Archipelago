@@ -8,6 +8,7 @@ find_package(SDL3 CONFIG REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 
 add_executable(archipelago_sim src/main.cpp)
 
@@ -16,4 +17,5 @@ target_link_libraries(archipelago_sim PRIVATE
     GLEW::GLEW
     OpenGL::GL
     imgui::imgui
+    glm::glm
 )

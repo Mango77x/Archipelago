@@ -4,9 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 4.5 - Migración a 3D|Fase 4.5]] — en curso.**
-
-Insertada a petición explícita del usuario entre Fase 4 y Fase 5 — ver la propia nota de la fase para el porqué. No es un desvío improvisado: es la mitigación al riesgo de posponer el 3D que ya estaba anotada en [[Roadmap tecnológico]], convertida en fase formal.
+**Fase actual: [[Fase 5 - Primera empresa de IA|Fase 5]] — sin empezar.**
 
 ## Fase 0 — cerrada
 
@@ -38,9 +36,13 @@ Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 3 -
 
 Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 4 - Logística multi-isla]]. Resumen: 3 islas con la cadena repartida (Mina/Acería/Puerto) a distancia real, cámara siguiendo al jugador, flota con rutas (jugador libre, bots restringidos a su ruta), anillos visuales de muelle, autopiloto con frenado, reequilibrio del reloj económico (varias vueltas de ajuste tras pruebas del usuario: barco atascado, violación de balance, bancarrota por reloj mal calibrado), y el checkpoint de Sistema de Replay (F6/F7, paso de simulación fijo).
 
+## Fase 4.5 — cerrada
+
+Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 4.5 - Migración a 3D]]. Resumen: renderizado 3D real (perspectiva, profundidad, cajas/casco simple), cámara conmutable primera/tercera persona (tecla C), iluminación direccional simple (añadida dentro de esta fase, ajuste de alcance a petición del usuario), y migración de todas las posiciones del mundo a `glm::vec3`. Economía, rutas, guardado/carga y replay de Fase 4 siguen funcionando igual por debajo.
+
 ## Siguiente paso
 
-Terminar [[Fase 4.5 - Migración a 3D]] (en curso), y después [[Fase 5 - Primera empresa de IA]] — una empresa autónoma que usa exactamente las mismas mecánicas que el jugador. El propio roadmap avisa de que Fase 5, tal como está descrita, es en realidad un proyecto de IA en sí mismo — cuando se empiece, hay que desglosarla en sub-fases con su propio Definition of Done antes de tocar código, igual que se hizo con este roadmap completo.
+[[Fase 5 - Primera empresa de IA]] — una empresa autónoma que usa exactamente las mismas mecánicas que el jugador. El propio roadmap avisa de que Fase 5, tal como está descrita, es en realidad un proyecto de IA en sí mismo — cuando se empiece, hay que desglosarla en sub-fases con su propio Definition of Done antes de tocar código, igual que se hizo con este roadmap completo.
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 
