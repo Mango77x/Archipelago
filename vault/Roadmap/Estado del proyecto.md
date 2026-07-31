@@ -58,9 +58,11 @@ Definition of Done confirmada por el usuario jugando en directo. Ver detalle com
 
 Además, en respuesta a que el usuario abriera `main.cpp` y viera 1873 líneas mezclando economía/física/render/guardado en un único archivo: reorganización completa en módulos por sistema (`common`, `waves`, `economy`, `jolt_world`, `ship`, `simulation`, `save_load`, `replay`, `render`, más un `main.cpp` que ya solo contiene el punto de entrada y el bucle principal). Refactor puro, mismo comportamiento verificado.
 
+Dos ajustes más tras seguir jugando: (1) margen económico — el usuario iba "muy justo de dinero" con la IA compitiendo por el mismo Hierro/Acero/Mercado; se subió la conversión de la acería (50%→70%), la demanda del mercado (12→20/hora) y el precio mínimo (20%→35% del base); (2) los barcos se quedaban visualmente superpuestos al chocar entre sí pese a tener colisión habilitada — con el empuje de 400000N, 1 solo paso de colisión por tick no bastaba para separarlos; subido a 4 pasos. Ambos confirmados por el usuario.
+
 ## Siguiente paso
 
-Resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones, demanda energética) o retomar el balance económico pendiente (ver más abajo) — a decidir con el usuario. Después vendría [[Fase 8 - Mundo procedural]].
+Resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones, demanda energética) o [[Fase 8 - Mundo procedural]] — a decidir con el usuario.
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 
@@ -69,6 +71,6 @@ Resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones,
 - [[Carga física - contenedores]] — el contenedor como única unidad físicamente interactuable, base de [[Fase 9 - Seguridad]].
 - [[Vehículos como producto económico]] — los vehículos son productos con productor propio; comprar barcos a facciones neutrales es una simplificación hasta que existan facciones/astilleros simulados de verdad.
 - [[Facciones establecidas y el hueco del jugador]] — las facciones aparecen ya montadas (como X4), el jugador se busca un hueco; no compiten simétricamente con él desde cero.
-- **Balance económico y modelo de mercado a revisar** — jugando durante el playtesting de Fase 7.0 (con el manejo por física ya validado, barcos completando el ciclo recogida→venta), la caja del jugador apenas se sostiene o entra en números rojos: el mercado abstracto ("absorbe" stock con una curva de precio) da poco margen frente al mantenimiento por hora, y encima el usuario señaló que ese modelo no se parece al de X4 (ahí el trade son órdenes explícitas estación-a-estación, no un mercado abstracto). Pendiente de retocar cuando se retome economía (post Fase 7), probablemente junto con [[Vehículos como producto económico]].
+- **Modelo de mercado abstracto pendiente de revisar** — el usuario señaló que el mercado actual (absorbe stock con una curva de precio) no se parece al de X4, donde el trade son órdenes explícitas estación-a-estación. El *margen* del jugador ya se ajustó (ver más abajo), pero el modelo en sí sigue siendo la simplificación de Fase 2; cambiarlo de verdad espera a que existan estaciones/facciones reales, probablemente junto con [[Vehículos como producto económico]].
 
 Ninguna de estas afecta el código actual — son visión a largo plazo documentada para no perderla, salvo "Vehículos como producto económico", que ya tiene una simplificación concreta implementada en Fase 3.
