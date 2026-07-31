@@ -14,6 +14,7 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -35,7 +36,12 @@ using namespace archipelago;
 // Sea footprint (kSeaCenterX/Z, kSeaHalfExtentX/Z) now lives in common.h —
 // shared with weather.h, which needs it to know where storm cells are
 // allowed to spawn.
-constexpr float kSeaFloorDepth = -250.0f;
+
+// Fase 8.0 (Terreno procedural): fixed for now — paso 6 will move this into
+// the save file so loading a save reproduces the same generated world.
+// Jolt's HeightFieldShape requires a power-of-2 sample count.
+constexpr uint32_t kWorldSeed = 42;
+constexpr int kTerrainSampleCount = 128;
 
 int main(int argc, char** argv) {
     (void)argc;
@@ -62,7 +68,8 @@ int main(int argc, char** argv) {
                         /*maxContactConstraints=*/1024, broadPhaseLayerInterface, objectVsBroadPhaseFilter,
                         objectLayerPairFilter);
     JPH::BodyInterface& bodyInterface = physicsSystem.GetBodyInterface();
-    CreateSeaFloorBody(bodyInterface, kSeaCenterX, kSeaCenterZ, kSeaHalfExtentX, kSeaHalfExtentZ, kSeaFloorDepth);
+    CreateSeaFloorHeightFieldBody(bodyInterface, kSeaCenterX, kSeaCenterZ, kSeaHalfExtentX, kSeaHalfExtentZ,
+                                   kTerrainSampleCount, kWorldSeed);
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
@@ -157,6 +164,33 @@ int main(int argc, char** argv) {
                  waterIndices.data(), GL_STATIC_DRAW);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(0);
+
+    // Fase 8.0 (Terreno procedural), paso 2: seafloor heightmap mesh — static
+    // (unlike the water, terrain doesn't animate), so position+normal are
+    // computed once on the CPU and uploaded, no dedicated shader needed
+    // (reuses litShaderProgram set up below).
+    constexpr int kTerrainMeshSegments = 128;
+    std::vector<float> terrainVertices;
+    std::vector<GLuint> terrainIndices;
+    GenerateTerrainMesh(kSeaCenterX, kSeaCenterZ, kSeaHalfExtentX, kSeaHalfExtentZ, kTerrainMeshSegments, kWorldSeed,
+                        terrainVertices, terrainIndices);
+    GLsizei terrainIndexCount = static_cast<GLsizei>(terrainIndices.size());
+
+    GLuint terrainVao = 0, terrainVbo = 0, terrainEbo = 0;
+    glGenVertexArrays(1, &terrainVao);
+    glGenBuffers(1, &terrainVbo);
+    glGenBuffers(1, &terrainEbo);
+    glBindVertexArray(terrainVao);
+    glBindBuffer(GL_ARRAY_BUFFER, terrainVbo);
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(terrainVertices.size() * sizeof(float)),
+                 terrainVertices.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, terrainEbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(terrainIndices.size() * sizeof(GLuint)),
+                 terrainIndices.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
 
     // Isla 1 (Minera) -> Isla 2 (Industrial) -> Isla 3 (Portuaria). Real
     // distance between them on purpose (thousands of units, not hundreds) —
@@ -445,12 +479,10 @@ int main(int argc, char** argv) {
         glUseProgram(litShaderProgram);
         glUniform3f(lightDirLoc, 0.4f, -1.0f, 0.3f);
 
-        // Fase 7.1: flat seafloor, same footprint as the water (see
-        // CreateSeaFloorBody) — just a visual/collision baseline for now, no
-        // terrain shape until procedural world generation exists.
-        DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj,
-                Vec3{kSeaCenterX, kSeaFloorDepth, kSeaCenterZ},
-                Vec3{kSeaHalfExtentX * 2.0f, 20.0f, kSeaHalfExtentZ * 2.0f}, 0.0f, 0.3f, 0.27f, 0.2f);
+        // Fase 8.0 (Terreno procedural), paso 2: real seafloor heightmap,
+        // replacing the flat box from Fase 7.1.
+        DrawTerrain(terrainVao, terrainIndexCount, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, 0.3f, 0.27f,
+                    0.2f);
 
         DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, minePos + Vec3{0, 40, 0},
                 Vec3{120, 80, 80}, 0.0f, 0.55f, 0.35f, 0.15f);
@@ -600,6 +632,9 @@ int main(int argc, char** argv) {
     glDeleteBuffers(1, &waterVbo);
     glDeleteBuffers(1, &waterEbo);
     glDeleteVertexArrays(1, &waterVao);
+    glDeleteBuffers(1, &terrainVbo);
+    glDeleteBuffers(1, &terrainEbo);
+    glDeleteVertexArrays(1, &terrainVao);
     glDeleteProgram(litShaderProgram);
     glDeleteProgram(unlitShaderProgram);
     glDeleteProgram(waterShaderProgram);

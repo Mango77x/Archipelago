@@ -5,6 +5,8 @@
 // floor + a box falling under gravity and settling on it) before wiring
 // CargoShip to a real rigid body. ---
 
+#include <cstdint>
+
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
@@ -48,14 +50,12 @@ public:
     bool ShouldCollide(JPH::ObjectLayer object1, JPH::ObjectLayer object2) const override;
 };
 
-// Fase 7.1: a simple flat seafloor — static collision body, deep enough to
-// stay out of the way of normal buoyancy (nothing should ever ride this low
-// under current gameplay). No deformation/terrain yet, on purpose: the user
-// asked for "just a floor for now," with actual terrain shape deferred to
-// whenever procedural world generation (Fase 8) settles what that even
-// means. Exists mainly so the sea has *something* down there for whatever
-// eventually needs it — grounding, anchoring, submarines.
-JPH::BodyID CreateSeaFloorBody(JPH::BodyInterface& bodyInterface, float centerX, float centerZ, float halfExtentX,
-                                float halfExtentZ, float depth);
+// Fase 8.0 (Terreno procedural), paso 2: the flat Fase 7.1 seafloor becomes
+// a real heightfield — static collision body sampling Terrain::SeaFloorHeight
+// on a regular grid (sampleCount x sampleCount, must be a power of 2 —
+// Jolt's HeightFieldShape requirement) covering [centerX-halfExtentX,
+// centerX+halfExtentX] x [centerZ-halfExtentZ, centerZ+halfExtentZ].
+JPH::BodyID CreateSeaFloorHeightFieldBody(JPH::BodyInterface& bodyInterface, float centerX, float centerZ,
+                                           float halfExtentX, float halfExtentZ, int sampleCount, uint32_t seed);
 
 }  // namespace archipelago

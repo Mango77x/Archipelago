@@ -6,6 +6,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include "terrain.h"
+
 namespace archipelago {
 
 namespace {
@@ -389,6 +391,68 @@ void DrawDockRing(GLuint ringVao, GLuint ringVbo, GLint mvpLoc, GLint colorLoc, 
     glBindBuffer(GL_ARRAY_BUFFER, ringVbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
     glDrawArrays(GL_LINE_LOOP, 0, kDockRingSegments);
+}
+
+void GenerateTerrainMesh(float centerX, float centerZ, float halfExtentX, float halfExtentZ, int segments,
+                          uint32_t seed, std::vector<float>& outVertices, std::vector<GLuint>& outIndices) {
+    int verticesPerSide = segments + 1;
+    float minX = centerX - halfExtentX;
+    float minZ = centerZ - halfExtentZ;
+    float stepX = (2.0f * halfExtentX) / static_cast<float>(segments);
+    float stepZ = (2.0f * halfExtentZ) / static_cast<float>(segments);
+    float eps = std::min(stepX, stepZ) * 0.25f;
+
+    outVertices.clear();
+    outVertices.reserve(static_cast<size_t>(verticesPerSide) * verticesPerSide * 6);
+    for (int row = 0; row < verticesPerSide; ++row) {
+        float z = minZ + stepZ * static_cast<float>(row);
+        for (int col = 0; col < verticesPerSide; ++col) {
+            float x = minX + stepX * static_cast<float>(col);
+            float h = Terrain::SeaFloorHeight(x, z, seed);
+            float hx1 = Terrain::SeaFloorHeight(x + eps, z, seed);
+            float hx0 = Terrain::SeaFloorHeight(x - eps, z, seed);
+            float hz1 = Terrain::SeaFloorHeight(x, z + eps, seed);
+            float hz0 = Terrain::SeaFloorHeight(x, z - eps, seed);
+            float dhdx = (hx1 - hx0) / (2.0f * eps);
+            float dhdz = (hz1 - hz0) / (2.0f * eps);
+            glm::vec3 normal = glm::normalize(glm::vec3(-dhdx, 1.0f, -dhdz));
+            outVertices.push_back(x);
+            outVertices.push_back(h);
+            outVertices.push_back(z);
+            outVertices.push_back(normal.x);
+            outVertices.push_back(normal.y);
+            outVertices.push_back(normal.z);
+        }
+    }
+
+    outIndices.clear();
+    outIndices.reserve(static_cast<size_t>(segments) * segments * 6);
+    for (int row = 0; row < segments; ++row) {
+        for (int col = 0; col < segments; ++col) {
+            GLuint topLeft = static_cast<GLuint>(row * verticesPerSide + col);
+            GLuint topRight = topLeft + 1;
+            GLuint bottomLeft = static_cast<GLuint>((row + 1) * verticesPerSide + col);
+            GLuint bottomRight = bottomLeft + 1;
+            outIndices.push_back(topLeft);
+            outIndices.push_back(bottomLeft);
+            outIndices.push_back(topRight);
+            outIndices.push_back(topRight);
+            outIndices.push_back(bottomLeft);
+            outIndices.push_back(bottomRight);
+        }
+    }
+}
+
+void DrawTerrain(GLuint terrainVao, GLsizei indexCount, GLint mvpLoc, GLint normalMatrixLoc, GLint colorLoc,
+                  const glm::mat4& viewProj, float r, float g, float b) {
+    // Mesh is already in world space (no model transform), so MVP = viewProj
+    // and the normal matrix is just identity.
+    glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, glm::value_ptr(viewProj));
+    glm::mat3 identity(1.0f);
+    glUniformMatrix3fv(normalMatrixLoc, 1, GL_FALSE, glm::value_ptr(identity));
+    glUniform3f(colorLoc, r, g, b);
+    glBindVertexArray(terrainVao);
+    glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
 }
 
 glm::mat4 ComputeViewProj(CameraMode mode, Vec3 shipPos, float heading, float aspect) {

@@ -4,6 +4,7 @@
 // simple box/hull geometry, a wave-displaced water mesh (Fase 7.1). Still
 // placeholder shapes (no imported models) — fidelity stays last priority. ---
 
+#include <cstdint>
 #include <vector>
 
 #include <GL/glew.h>
@@ -60,6 +61,21 @@ void DrawWater(GLuint waterVao, GLsizei indexCount, GLint viewProjLoc, GLint tim
 // as a ring on the water, so it's visible where a ship needs to be.
 void DrawDockRing(GLuint ringVao, GLuint ringVbo, GLint mvpLoc, GLint colorLoc, const glm::mat4& viewProj,
                    Vec3 center, float radius);
+
+// Fase 8.0 (Terreno procedural), paso 2/5: unlike the water grid, terrain
+// doesn't animate, so its mesh is fully computed once on the CPU (position
+// AND normal per vertex, normal via finite differences on
+// Terrain::SeaFloorHeight — that function is fBm noise, not a closed form
+// like the wave field, so no clean analytic derivative the way the water
+// shader has). Same interleaved position+normal layout as kCubeVertices, so
+// it draws with the existing lit shader — no dedicated terrain shader
+// needed, just an identity model matrix since the mesh is already in world
+// space.
+void GenerateTerrainMesh(float centerX, float centerZ, float halfExtentX, float halfExtentZ, int segments,
+                          uint32_t seed, std::vector<float>& outVertices, std::vector<GLuint>& outIndices);
+
+void DrawTerrain(GLuint terrainVao, GLsizei indexCount, GLint mvpLoc, GLint normalMatrixLoc, GLint colorLoc,
+                  const glm::mat4& viewProj, float r, float g, float b);
 
 enum class CameraMode { ThirdPerson, FirstPerson };
 
