@@ -4,7 +4,9 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 5 - Primera empresa de IA|Fase 5]] — sin empezar.**
+**Fase actual: [[Fase 4.5 - Migración a 3D|Fase 4.5]] — en curso.**
+
+Insertada a petición explícita del usuario entre Fase 4 y Fase 5 — ver la propia nota de la fase para el porqué. No es un desvío improvisado: es la mitigación al riesgo de posponer el 3D que ya estaba anotada en [[Roadmap tecnológico]], convertida en fase formal.
 
 ## Fase 0 — cerrada
 
@@ -38,7 +40,7 @@ Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 4 -
 
 ## Siguiente paso
 
-[[Fase 5 - Primera empresa de IA]] — una empresa autónoma que usa exactamente las mismas mecánicas que el jugador. El propio roadmap avisa de que esta fase, tal como está descrita, es en realidad un proyecto de IA en sí mismo — cuando se empiece, hay que desglosarla en sub-fases con su propio Definition of Done antes de tocar código, igual que se hizo con este roadmap completo.
+Terminar [[Fase 4.5 - Migración a 3D]] (en curso), y después [[Fase 5 - Primera empresa de IA]] — una empresa autónoma que usa exactamente las mismas mecánicas que el jugador. El propio roadmap avisa de que Fase 5, tal como está descrita, es en realidad un proyecto de IA en sí mismo — cuando se empiece, hay que desglosarla en sub-fases con su propio Definition of Done antes de tocar código, igual que se hizo con este roadmap completo.
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 

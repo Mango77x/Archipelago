@@ -12,4 +12,4 @@ Introduce competencia: una empresa autónoma que usa exactamente las mismas mec�
 
 Depende del Sistema de Replay añadido al final de [[Fase 4 - Logística multi-isla|Fase 4]].
 
-Anterior: [[Fase 4 - Logística multi-isla]]. Siguiente: [[Fase 6 - Gobiernos]].
+Anterior: [[Fase 4.5 - Migración a 3D]]. Siguiente: [[Fase 6 - Gobiernos]].

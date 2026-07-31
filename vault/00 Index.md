@@ -61,6 +61,7 @@ Este vault tiene dos partes que no deben confundirse:
 - [[Fase 2 - Economía]]
 - [[Fase 3 - Automatización]]
 - [[Fase 4 - Logística multi-isla]]
+- [[Fase 4.5 - Migración a 3D]]
 - [[Fase 5 - Primera empresa de IA]]
 - [[Fase 6 - Gobiernos]]
 - [[Fase 7 - Entorno]]
