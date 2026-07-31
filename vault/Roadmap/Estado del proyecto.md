@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 6 - Gobiernos|Fase 6]] — sin empezar.**
+**Fase actual: [[Fase 7 - Entorno|Fase 7]] — sin empezar. ([[Fase 6 - Gobiernos|Fase 6]] aplazada.)**
 
 ## Fase 0 — cerrada
 
@@ -44,9 +44,13 @@ Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 4.5
 
 Definition of Done confirmado por el usuario: "va mejorando su flota y ganando dinero". Cubierta por [[Fase 5.1 - Competidor con capital propio]] — empresa rival de IA con caja propia ($2000, mismas reglas que el jugador), compite por el mismo Hierro/Acero/Mercado (sin cadena de producción paralela), regla de expansión simple basada en caja disponible, flota autopilotada distinguible por color, panel propio, guardado/carga extendido. El usuario decidió no abrir más sub-fases de IA por ahora.
 
+## Fase 6 — aplazada
+
+[[Fase 6 - Gobiernos]] (impuestos, infraestructura, puertos públicos, inversiones, regulaciones) se aplaza a petición explícita del usuario. Gobernar es lo que hace una facción establecida sobre su territorio (modelo X4, empresa y gobierno unificados) — no hay todavía facciones establecidas de verdad ni territorio real que disputar. Se retoma cuando el mundo sea lo bastante grande, probablemente tras [[Fase 8 - Mundo procedural]]. Ver [[Facciones establecidas y el hueco del jugador]].
+
 ## Siguiente paso
 
-[[Fase 6 - Gobiernos]] — impuestos, infraestructura, puertos públicos, inversiones, regulaciones. Todavía sin desglosar en un primer paso concreto.
+[[Fase 7 - Entorno]] — clima, tormentas, pesca, estaciones, demanda energética. Todavía sin desglosar en un primer paso concreto.
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 
@@ -54,5 +58,6 @@ Definition of Done confirmado por el usuario: "va mejorando su flota y ganando d
 - [[Vehículos como interfaz]] — roster completo (naval/aéreo/terrestre, civil/militar), no solo barcos.
 - [[Carga física - contenedores]] — el contenedor como única unidad físicamente interactuable, base de [[Fase 9 - Seguridad]].
 - [[Vehículos como producto económico]] — los vehículos son productos con productor propio; comprar barcos a facciones neutrales es una simplificación hasta que existan facciones/astilleros simulados de verdad.
+- [[Facciones establecidas y el hueco del jugador]] — las facciones aparecen ya montadas (como X4), el jugador se busca un hueco; no compiten simétricamente con él desde cero.
 
-Ninguna de estas afecta el código actual — son visión a largo plazo documentada para no perderla, salvo la última, que ya tiene una simplificación concreta implementada en Fase 3.
+Ninguna de estas afecta el código actual — son visión a largo plazo documentada para no perderla, salvo "Vehículos como producto económico", que ya tiene una simplificación concreta implementada en Fase 3.

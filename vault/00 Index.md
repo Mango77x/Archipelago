@@ -31,6 +31,7 @@ Este vault tiene dos partes que no deben confundirse:
 
 ## Mundo
 - [[Industria, transporte, IA, guerra, escala]]
+- [[Facciones establecidas y el hueco del jugador]]
 
 ## Tecnología
 - [[Motor y stack técnico]]
