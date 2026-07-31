@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 2 - Economía|Fase 2]] — en curso.**
+**Fase actual: [[Fase 3 - Automatización|Fase 3]] — sin empezar.**
 
 ## Fase 0 — cerrada
 
@@ -24,14 +24,13 @@ Definition of Done confirmada por el usuario ("un jugador nuevo entiende la cade
 
 Committeado y pusheado en git (`main`, repo en GitHub).
 
-## Fase 2 — progreso hasta ahora
+## Fase 2 — cerrada
 
-Ver detalle completo en [[Fase 2 - Economía]]. Resumen: mercado de oferta/demanda de un solo bien (Acero) con precio que reacciona al ritmo de entrega del jugador, caja del jugador con gastos fijos de mantenimiento que corren siempre, guardado/carga y panel de ImGui extendidos. Probado por el usuario, pendiente de commit/push.
+Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 2 - Economía]]. Resumen: mercado de oferta/demanda de un solo bien (Acero) con precio que reacciona al ritmo de entrega del jugador, caja del jugador con gastos fijos de mantenimiento que corren siempre, guardado/carga y panel de ImGui extendidos. Committeado y pusheado en git (`main`, repo en GitHub).
 
-## Pendiente para cerrar Fase 2
+## Siguiente paso
 
-- Confirmar con el usuario que el Definition of Done se cumple ("el jugador solo puede aumentar beneficios mejorando la logística") antes de dar la fase por cerrada.
-- Commit + push de este cambio.
+[[Fase 3 - Automatización]] — comprar barcos adicionales, asignar rutas y horarios, los barcos trabajan de forma autónoma. Todavía sin empezar; falta desglosar el primer paso concreto.
 
 ## Decisiones de diseño añadidas durante Fase 1 (vigentes para cuando toque implementarlas)
 

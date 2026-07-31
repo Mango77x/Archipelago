@@ -2,7 +2,7 @@
 tags: [roadmap, fase]
 ---
 
-# Fase 2 — Economía (EN CURSO)
+# Fase 2 — Economía (CERRADA)
 
 Introduce precios, compra, venta, beneficio, gastos. El jugador se convierte en emprendedor logístico.
 
@@ -15,7 +15,7 @@ Introduce precios, compra, venta, beneficio, gastos. El jugador se convierte en 
 - Guardado/carga (F5/F9) extendido para incluir el estado de `Market` y `Economy`.
 - Panel de ImGui extendido: caja, precio actual, stock de mercado, ingresos y gastos totales.
 
-Probado por el usuario: el precio reacciona de forma perceptible al ritmo de entrega ("pinta bien").
+Probado por el usuario: el precio reacciona de forma perceptible al ritmo de entrega ("pinta bien"). Definition of Done confirmada por el usuario — fase cerrada.
 
 ## Deliberadamente fuera de este primer corte
 
