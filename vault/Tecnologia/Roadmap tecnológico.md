@@ -1,0 +1,15 @@
+---
+tags: [roadmap, tecnologia]
+---
+
+# Roadmap tecnológico (qué se introduce, cuándo y por qué)
+
+- **SDL3** — introducido en [[Fase 1 - Primer prototipo jugable|Fase 1]]. Razón: ventana, input, rendering básico. Validado también a largo plazo: SDL3 tiene soporte HID amplio (joysticks, volantes, haptics), relevante porque pilotar barco/avión/coche/tanque en primera persona probablemente quiera esquemas de control distintos por vehículo (palanca, volante, throttle) — ver [[Vehículos como interfaz]].
+- **OpenGL** — introducido en Fase 1. Razón: rendering placeholder simple, iteración rápida, sin la complejidad de Vulkan.
+- **ECS** — no se introduce al principio. Solo se justifica si el profiling muestra que la gestión de entidades se vuelve cara, hay ineficiencia de caché, o cuellos de botella en el update. Con el alcance actual (100k+ entidades, vehículos multi-dominio) es probable que acabe justificándose — pero cuando llegue ese momento, comparar EnTT (sparse-set, rápido de adoptar) contra un ECS de archetypes propio (más control de cache-friendliness para iterar físicas de vehículo + economía en paralelo) en vez de asumir EnTT por defecto solo por estar en la lista de candidatos.
+- **Job System** — no se introduce al principio. Solo después de que la simulación esté limitada por CPU y el profiling demuestre que la paralelización es necesaria. Ver [[Determinismo vs multithreading]].
+- **Vulkan** — diferido. Solo se justifica si el rendering se convierte en un cuello de botella medible. Hasta entonces, el rendering no es el proyecto — la simulación sí lo es. Cuando se revise, la justificación real no será "es más moderno" sino GPU-driven rendering (indirect draws, bindless textures) para dibujar miles de vehículos con LOD.
+- **Motor de física (Jolt)** — diferido. Los vehículos se mueven inicialmente por modelos cinemáticos simples (ver [[Vehículos como interfaz]]). Se introduce física real solo cuando el gameplay requiera colisiones o dinámica realista. Validado a largo plazo: Jolt está diseñado para grandes cantidades de rigid bodies activos simultáneos, con constraints de vehículos con ruedas ya integrados, y con un **modo determinista multiplataforma** como objetivo explícito de diseño — encaja directamente con [[Principios - Ingeniería de software|el principio 41 (determinismo)]] y con el roster multi-dominio, donde boyantez/sustentación/tracción se modelan como fuerzas propias sobre el rigid body que da el motor.
+- **UI final del juego (hueco sin resolver)** — Dear ImGui está bien escogido como herramienta de debug para Fase 1 ("opcional"), pero es immediate-mode y no es apropiado como UI final del juego. La capa de mando tipo mapa de X4 (ver [[Encarnación y capa de mando]]) necesitará un sistema de UI retained-mode, data-driven y moddable que hoy no está decidido. No urge resolverlo ahora — es una decisión de una fase futura — pero queda anotado para no perderlo.
+
+Ver también: [[Motor y stack técnico]], [[Arquitectura y modding]].
