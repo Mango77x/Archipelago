@@ -169,9 +169,18 @@ int main(int argc, char** argv) {
     island2Warehouse.Deposit(Resource::Iron, 30);  // small starting stockpile: mill isn't dead on turn one
     IronMine mine(/*rate=*/10);
     mine.SetTotalProduced(30);  // matches the seeded stockpile above, so the balance invariant holds from tick 1
-    SteelMill mill(/*consumeRate=*/10, /*outputRatioPercent=*/50);
+    // outputRatioPercent bumped 50->70 and demandPerHour 12->20: with the AI
+    // company able to grow to 5 ships (Fase 5.1) all competing with the
+    // player for the same Hierro/Acero/Mercado, the old numbers meant total
+    // Steel supply (5/hour) and market absorption (12/hour) couldn't keep up
+    // once more than one or two ships were actually shuttling — price
+    // crashed toward the floor and there often wasn't enough Steel to fill a
+    // hold anyway, regardless of price. Iron production (mine rate below)
+    // stays untouched: consumeRate=10 still matches it exactly, so the mill
+    // just converts more of the same Iron instead of needing more of it.
+    SteelMill mill(/*consumeRate=*/10, /*outputRatioPercent=*/70);
     Port port;
-    Market market(/*basePrice=*/10.0, /*demandPerHour=*/12.0f, /*sensitivity=*/0.05);
+    Market market(/*basePrice=*/10.0, /*demandPerHour=*/20.0f, /*sensitivity=*/0.05);
     Economy economy(/*startingCash=*/2000.0);
     constexpr double kBaseMaintenanceCost = 3.0;      // mine + mill upkeep, independent of fleet size
     constexpr double kPerShipMaintenanceCost = 5.0;   // each ship (player's included) adds its own upkeep
@@ -378,7 +387,15 @@ int main(int argc, char** argv) {
             // One physics step for every body in the world, then per-ship
             // game logic reads back the settled position/velocity — see
             // "Fase 7.0" comment on ClampSpeed()/HandleDocking().
-            physicsSystem.Update(static_cast<float>(kFixedDt), 1, &physicsTempAllocator, &physicsJobSystem);
+            //
+            // 4 collision steps, not 1: ship-vs-ship collision is enabled
+            // (see JoltObjectLayerPairFilter) but thrust forces are huge
+            // (400000N) — with a single step per fixed update the solver
+            // couldn't fully separate two ships pushed hard against each
+            // other, so hulls visibly interpenetrated instead of bouncing
+            // apart. More sub-steps within the same kFixedDt fixes that
+            // without changing the overall simulation rate.
+            physicsSystem.Update(static_cast<float>(kFixedDt), 4, &physicsTempAllocator, &physicsJobSystem);
             waveTime += kFixedDt;
 
             for (size_t i = 0; i < playerShips.size(); ++i) {

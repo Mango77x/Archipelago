@@ -95,7 +95,12 @@ public:
     }
 
 private:
-    static constexpr double kMinPriceFraction = 0.2;
+    // Raised 0.2->0.35: with multiple ships (player + AI) selling into one
+    // shared market, a glut was cratering price hard enough that a full
+    // 20-unit hold barely covered a round trip's own maintenance. A higher
+    // floor keeps selling worthwhile even when stock is high, without
+    // removing the "don't flood the market" pressure entirely.
+    static constexpr double kMinPriceFraction = 0.35;
     double basePrice_;
     float demandPerHour_;
     double sensitivity_;
