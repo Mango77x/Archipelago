@@ -9,6 +9,17 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <Jolt/Jolt.h>
+#include <Jolt/RegisterTypes.h>
+#include <Jolt/Core/Factory.h>
+#include <Jolt/Core/TempAllocator.h>
+#include <Jolt/Core/JobSystemThreadPool.h>
+#include <Jolt/Physics/PhysicsSettings.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyActivationListener.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -16,6 +27,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -251,10 +263,15 @@ float HorizontalDistance(const Vec3& a, const Vec3& b) {
     return std::sqrt(dx * dx + dz * dz);
 }
 
-// Player-piloted (or autopiloted) cargo ship: simple kinematic model (thrust
-// + drag + angular inertia) on the X/Z plane, not a physics engine — enough
-// to feel like a boat without pulling in Jolt before the gameplay actually
-// needs collisions (see CLAUDE.md / vault).
+// Player-piloted (or autopiloted) cargo ship — Fase 7.0: backed by a real
+// Jolt rigid body instead of a hand-rolled kinematic model. Thrust/turn are
+// real forces/torques applied to the body; PhysicsSystem::Update() (called
+// once per fixed step for every ship at once, in main()) does the actual
+// integration. Gravity is disabled and translation/rotation are constrained
+// to the X/Z plane + yaw (EAllowedDOFs) — there's no water simulation yet
+// (that's Fase 7.1, buoyancy/oleaje), so for now the hull just glides on an
+// implicit flat sea, but via real mass/force/damping instead of manually
+// nudging a velocity vector.
 //
 // Loading/unloading is purely proximity + cargo-state driven: the ship reacts
 // to whichever island dock it's physically at and whatever it's currently
@@ -267,118 +284,105 @@ public:
     // Radius (world units) around a dock where loading/unloading triggers.
     // Public so rendering can draw the same zone the simulation actually uses.
     static constexpr float kDockRadius = 40.0f;
+    // Safety-net clamp while thrust/damping values are still being tuned by
+    // feel — not a permanent kludge, drop it once the equilibrium speed from
+    // real force-vs-damping is dialed in and this stops being necessary.
+    static constexpr float kMaxSpeed = 160.0f;
 
-    CargoShip(int capacity, Vec3 startPos, RouteKind routeKind)
-        : capacity_(capacity), position_(startPos), routeKind_(routeKind) {}
+    // The Jolt body must already exist (see CreateShipBody) — CargoShip
+    // doesn't own its lifetime. BodyID is a small, trivially-copyable handle;
+    // ships are never destroyed once created in this game, so explicit
+    // cleanup isn't needed yet (revisit if/when ships can sink or despawn).
+    CargoShip(JPH::BodyInterface& bodyInterface, JPH::BodyID bodyId, int capacity, RouteKind routeKind)
+        : bodyInterface_(&bodyInterface), bodyId_(bodyId), capacity_(capacity), routeKind_(routeKind) {}
 
     // Takes resolved intent flags rather than raw SDL key state, so the same
     // call works whether the flags came from a live keyboard this frame or
     // from a recorded ReplayFrame during playback (see Replay system below) —
     // CargoShip doesn't need to know or care which.
-    void ApplyInput(bool thrustForward, bool thrustBackward, bool turnLeft, bool turnRight, float dt) {
-        constexpr float kThrust = 220.0f;
-        constexpr float kTurnRate = 2.5f;
-
-        if (thrustForward) {
-            velocity_.x += std::cos(heading_) * kThrust * dt;
-            velocity_.z += std::sin(heading_) * kThrust * dt;
-        }
-        if (thrustBackward) {
-            velocity_.x -= std::cos(heading_) * kThrust * dt;
-            velocity_.z -= std::sin(heading_) * kThrust * dt;
-        }
-        if (turnLeft) angularVelocity_ -= kTurnRate * dt;
-        if (turnRight) angularVelocity_ += kTurnRate * dt;
+    void ApplyInput(bool thrustForward, bool thrustBackward, bool turnLeft, bool turnRight) {
+        float heading = CurrentHeading();
+        JPH::Vec3 forward(std::cos(heading), 0.0f, std::sin(heading));
+        if (thrustForward) bodyInterface_->AddForce(bodyId_, forward * kThrustForce);
+        if (thrustBackward) bodyInterface_->AddForce(bodyId_, forward * -kThrustForce);
+        if (turnLeft) bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, -kTurnTorque, 0.0f));
+        if (turnRight) bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, kTurnTorque, 0.0f));
     }
 
-    // Autonomous ships steer with the same thrust/turn-rate model as the
-    // player (principle: the same rules apply, no special-cased movement for
+    // Autonomous ships steer with the same thrust/torque model as the player
+    // (principle: the same rules apply, no special-cased movement for
     // AI-controlled assets). Target is the ship's assigned pair of docks,
     // picked by cargo state: empty means "go get more," carrying means "go
     // deliver."
     //
     // This is "arrive" steering, not just "seek": the desired speed tapers
     // down as distance to the target shrinks, and the ship actively brakes
-    // (thrust opposing current velocity) whenever it's going faster than
+    // (force opposing current velocity) whenever it's going faster than
     // that — otherwise it reaches the dock at full speed and skids/overshoots
-    // trying to correct, which looked wrong in testing.
-    void AutoPilot(float dt, Vec3 island1Dock, Vec3 island2Dock, Vec3 island3Dock) {
-        constexpr float kThrust = 220.0f;
-        constexpr float kTurnRate = 2.5f;
-        constexpr float kAngleThreshold = 0.15f;
-        constexpr float kThrustAngleLimit = 1.2f;
-        constexpr float kBrakingDistance = 260.0f;
-
+    // trying to correct, which looked wrong in testing (still true with real
+    // physics, if anything more so).
+    void AutoPilot(Vec3 island1Dock, Vec3 island2Dock, Vec3 island3Dock) {
         Vec3 origin = (routeKind_ == RouteKind::IronRoute) ? island1Dock : island2Dock;
         Vec3 destination = (routeKind_ == RouteKind::IronRoute) ? island2Dock : island3Dock;
         Vec3 target = (cargo_ <= 0) ? origin : destination;
 
-        float dx = target.x - position_.x;
-        float dz = target.z - position_.z;
+        Vec3 pos = position();
+        float dx = target.x - pos.x;
+        float dz = target.z - pos.z;
         float distance = std::sqrt(dx * dx + dz * dz);
         if (distance < 1.0f) return;
 
+        float heading = CurrentHeading();
         float desiredHeading = std::atan2(dz, dx);
-        float angleDiff = NormalizeAngle(desiredHeading - heading_);
+        float angleDiff = NormalizeAngle(desiredHeading - heading);
 
         if (angleDiff > kAngleThreshold) {
-            angularVelocity_ += kTurnRate * dt;
+            bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, kTurnTorque, 0.0f));
         } else if (angleDiff < -kAngleThreshold) {
-            angularVelocity_ -= kTurnRate * dt;
+            bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, -kTurnTorque, 0.0f));
         }
 
-        float speed = std::sqrt(velocity_.x * velocity_.x + velocity_.z * velocity_.z);
+        Vec3 vel = velocity();
+        float speed = std::sqrt(vel.x * vel.x + vel.z * vel.z);
         float desiredSpeed = kMaxSpeed * std::min(1.0f, distance / kBrakingDistance);
 
-        if (speed > desiredSpeed) {
-            float newSpeed = std::max(desiredSpeed, speed - kThrust * dt);
-            if (speed > 0.01f) {
-                float scale = newSpeed / speed;
-                velocity_.x *= scale;
-                velocity_.z *= scale;
-            }
+        if (speed > desiredSpeed && speed > 0.01f) {
+            JPH::Vec3 brakeDir(-vel.x / speed, 0.0f, -vel.z / speed);
+            bodyInterface_->AddForce(bodyId_, brakeDir * kThrustForce);
         } else if (std::abs(angleDiff) < kThrustAngleLimit) {
-            velocity_.x += std::cos(heading_) * kThrust * dt;
-            velocity_.z += std::sin(heading_) * kThrust * dt;
+            JPH::Vec3 forward(std::cos(heading), 0.0f, std::sin(heading));
+            bodyInterface_->AddForce(bodyId_, forward * kThrustForce);
         }
     }
 
-    // isBot restricts loading/unloading to this ship's assigned routeKind_ —
-    // that's what stops an autopiloted ship from opportunistically scooping
-    // up the wrong resource and getting stuck (see comment below). The
+    // Clamps linear speed as a safety net (see kMaxSpeed) — called once per
+    // fixed step, after PhysicsSystem::Update() has integrated this step's
+    // forces, before HandleDocking() reads the settled position.
+    void ClampSpeed() {
+        JPH::Vec3 v = bodyInterface_->GetLinearVelocity(bodyId_);
+        float speed = std::sqrt(v.GetX() * v.GetX() + v.GetZ() * v.GetZ());
+        if (speed > kMaxSpeed) {
+            float scale = kMaxSpeed / speed;
+            bodyInterface_->SetLinearVelocity(bodyId_, JPH::Vec3(v.GetX() * scale, v.GetY(), v.GetZ() * scale));
+        }
+    }
+
+    // Game-logic half of what used to be Update(): physics integration now
+    // happens once for every body via PhysicsSystem::Update() in main(), so
+    // this only handles proximity-based loading/unloading, reading position
+    // from the Jolt body. isBot restricts loading/unloading to this ship's
+    // assigned routeKind_ — that's what stops an autopiloted ship from
+    // opportunistically scooping up the wrong resource and getting stuck. The
     // player's ship always passes isBot=false: a human pilot can dock
     // anywhere and load whatever's there, no restriction.
-    void Update(float dt, Warehouse& island1Warehouse, Warehouse& island2Warehouse, Market& market,
-                Economy& economy, Port& port, Vec3 island1Dock, Vec3 island2Dock, Vec3 island3Dock, bool isBot) {
-        constexpr float kLinearDrag = 0.6f;
-        constexpr float kAngularDrag = 0.85f;
-
-        velocity_.x *= std::pow(1.0f - kLinearDrag, dt);
-        velocity_.z *= std::pow(1.0f - kLinearDrag, dt);
-        angularVelocity_ *= std::pow(1.0f - kAngularDrag, dt);
-
-        float speed = std::sqrt(velocity_.x * velocity_.x + velocity_.z * velocity_.z);
-        if (speed > kMaxSpeed) {
-            velocity_.x = velocity_.x / speed * kMaxSpeed;
-            velocity_.z = velocity_.z / speed * kMaxSpeed;
-        }
-
-        position_.x += velocity_.x * dt;
-        position_.z += velocity_.z * dt;
-        heading_ += angularVelocity_ * dt;
-
-        // For bots, routeKind_ is a hold configuration, not just a steering
-        // hint — an Iron-route bot only ever loads/carries Iron. Without
-        // this, a bot that just delivered Iron at Isla 2 and is still
-        // sitting right there would immediately scoop up Steel it was never
-        // meant to carry, and then never leave (its "Iron route" destination
-        // IS Isla 2). The player isn't gated by this — fly anywhere, load
-        // whatever's there.
+    void HandleDocking(Warehouse& island1Warehouse, Warehouse& island2Warehouse, Market& market, Economy& economy,
+                        Port& port, Vec3 island1Dock, Vec3 island2Dock, Vec3 island3Dock, bool isBot) {
+        Vec3 pos = position();
         bool canHandleIron = !isBot || routeKind_ == RouteKind::IronRoute;
         bool canHandleSteel = !isBot || routeKind_ == RouteKind::SteelRoute;
 
         // Isla 1 (Mina): pick up Iron if the hold is empty.
-        if (canHandleIron && cargo_ <= 0 && HorizontalDistance(position_, island1Dock) <= kDockRadius) {
+        if (canHandleIron && cargo_ <= 0 && HorizontalDistance(pos, island1Dock) <= kDockRadius) {
             int available = island1Warehouse.Get(Resource::Iron);
             int amount = std::min(available, capacity_);
             if (amount > 0) {
@@ -390,7 +394,7 @@ public:
         }
 
         // Isla 2 (Aceria): deliver Iron if carrying it; otherwise pick up Steel if empty.
-        if (HorizontalDistance(position_, island2Dock) <= kDockRadius) {
+        if (HorizontalDistance(pos, island2Dock) <= kDockRadius) {
             if (cargo_ > 0 && cargoResource_ == Resource::Iron) {
                 island2Warehouse.Deposit(Resource::Iron, cargo_);
                 std::cout << "Cargo Ship delivered " << cargo_ << " Iron at Isla 2\n";
@@ -408,8 +412,7 @@ public:
         }
 
         // Isla 3 (Puerto): sell Steel.
-        if (cargo_ > 0 && cargoResource_ == Resource::Steel &&
-            HorizontalDistance(position_, island3Dock) <= kDockRadius) {
+        if (cargo_ > 0 && cargoResource_ == Resource::Steel && HorizontalDistance(pos, island3Dock) <= kDockRadius) {
             double revenue = market.Sell(cargo_);
             economy.AddRevenue(revenue);
             port.Export(cargo_);
@@ -418,36 +421,117 @@ public:
         }
     }
 
-    Vec3 position() const { return position_; }
-    Vec3 velocity() const { return velocity_; }
-    float heading() const { return heading_; }
-    float angularVelocity() const { return angularVelocity_; }
+    Vec3 position() const {
+        JPH::RVec3 p = bodyInterface_->GetCenterOfMassPosition(bodyId_);
+        return Vec3(static_cast<float>(p.GetX()), static_cast<float>(p.GetY()), static_cast<float>(p.GetZ()));
+    }
+    Vec3 velocity() const {
+        JPH::Vec3 v = bodyInterface_->GetLinearVelocity(bodyId_);
+        return Vec3(v.GetX(), v.GetY(), v.GetZ());
+    }
+    float heading() const { return CurrentHeading(); }
+    float angularVelocity() const { return bodyInterface_->GetAngularVelocity(bodyId_).GetY(); }
     int cargo() const { return cargo_; }
     Resource cargoResource() const { return cargoResource_; }
     RouteKind routeKind() const { return routeKind_; }
 
-    void SetState(Vec3 position, Vec3 velocity, float heading, float angularVelocity, int cargo,
+    void SetState(Vec3 position, Vec3 velocity, float heading, float angularVelocityY, int cargo,
                   Resource cargoResource) {
-        position_ = position;
-        velocity_ = velocity;
-        heading_ = heading;
-        angularVelocity_ = angularVelocity;
+        JPH::Quat rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(), heading);
+        bodyInterface_->SetPositionAndRotation(bodyId_, JPH::RVec3(position.x, position.y, position.z), rotation,
+                                                JPH::EActivation::Activate);
+        bodyInterface_->SetLinearVelocity(bodyId_, JPH::Vec3(velocity.x, velocity.y, velocity.z));
+        bodyInterface_->SetAngularVelocity(bodyId_, JPH::Vec3(0.0f, angularVelocityY, 0.0f));
         cargo_ = cargo;
         cargoResource_ = cargoResource;
     }
 
 private:
-    static constexpr float kMaxSpeed = 160.0f;
+    static constexpr float kThrustForce = 45000.0f;
+    static constexpr float kTurnTorque = 400000.0f;
+    static constexpr float kAngleThreshold = 0.15f;
+    static constexpr float kThrustAngleLimit = 1.2f;
+    static constexpr float kBrakingDistance = 260.0f;
 
+    float CurrentHeading() const {
+        JPH::Vec3 forward = bodyInterface_->GetRotation(bodyId_) * JPH::Vec3::sAxisX();
+        return std::atan2(forward.GetZ(), forward.GetX());
+    }
+
+    JPH::BodyInterface* bodyInterface_;
+    JPH::BodyID bodyId_;
     int capacity_;
-    Vec3 position_;
-    Vec3 velocity_{0.0f, 0.0f, 0.0f};
-    float heading_ = 0.0f;
-    float angularVelocity_ = 0.0f;
     int cargo_ = 0;
     Resource cargoResource_ = Resource::Iron;
     RouteKind routeKind_;
 };
+
+// --- Fase 7.0: Jolt Physics world setup. Layer/filter boilerplate follows
+// Jolt's own "HelloWorld" sample structure — validated separately (a static
+// floor + a box falling under gravity and settling on it) before wiring
+// CargoShip to a real rigid body. ---
+
+namespace JoltLayers {
+constexpr JPH::ObjectLayer kNonMoving = 0;
+constexpr JPH::ObjectLayer kMoving = 1;
+constexpr JPH::ObjectLayer kNumLayers = 2;
+}  // namespace JoltLayers
+
+namespace JoltBroadPhaseLayers {
+constexpr JPH::BroadPhaseLayer kNonMoving(0);
+constexpr JPH::BroadPhaseLayer kMoving(1);
+constexpr JPH::uint kNumLayers = 2;
+}  // namespace JoltBroadPhaseLayers
+
+class JoltBroadPhaseLayerInterface final : public JPH::BroadPhaseLayerInterface {
+public:
+    JoltBroadPhaseLayerInterface() {
+        objectToBroadPhase_[JoltLayers::kNonMoving] = JoltBroadPhaseLayers::kNonMoving;
+        objectToBroadPhase_[JoltLayers::kMoving] = JoltBroadPhaseLayers::kMoving;
+    }
+    JPH::uint GetNumBroadPhaseLayers() const override { return JoltBroadPhaseLayers::kNumLayers; }
+    JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override {
+        return objectToBroadPhase_[layer];
+    }
+
+private:
+    JPH::BroadPhaseLayer objectToBroadPhase_[JoltLayers::kNumLayers];
+};
+
+class JoltObjectVsBroadPhaseLayerFilter final : public JPH::ObjectVsBroadPhaseLayerFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer layer1, JPH::BroadPhaseLayer layer2) const override {
+        if (layer1 == JoltLayers::kNonMoving) return layer2 == JoltBroadPhaseLayers::kMoving;
+        return true;
+    }
+};
+
+class JoltObjectLayerPairFilter final : public JPH::ObjectLayerPairFilter {
+public:
+    bool ShouldCollide(JPH::ObjectLayer object1, JPH::ObjectLayer object2) const override {
+        if (object1 == JoltLayers::kNonMoving) return object2 == JoltLayers::kMoving;
+        return true;
+    }
+};
+
+// Creates a ship-hull rigid body: dynamic, gravity disabled, translation/
+// rotation constrained to the X/Z plane + yaw (no water simulation yet — see
+// CargoShip's class comment). Damping stands in for hull drag until Fase 7.1
+// adds real buoyancy/wave forces.
+JPH::BodyID CreateShipBody(JPH::BodyInterface& bodyInterface, Vec3 startPos) {
+    JPH::BoxShapeSettings shapeSettings(JPH::Vec3(24.0f, 8.0f, 12.0f));
+    JPH::ShapeRefC shape = shapeSettings.Create().Get();
+    JPH::BodyCreationSettings settings(shape, JPH::RVec3(startPos.x, startPos.y, startPos.z), JPH::Quat::sIdentity(),
+                                        JPH::EMotionType::Dynamic, JoltLayers::kMoving);
+    settings.mAllowedDOFs = JPH::EAllowedDOFs::TranslationX | JPH::EAllowedDOFs::TranslationZ |
+                             JPH::EAllowedDOFs::RotationY;
+    settings.mGravityFactor = 0.0f;
+    settings.mLinearDamping = 0.6f;
+    settings.mAngularDamping = 0.9f;
+    settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+    settings.mMassPropertiesOverride.mMass = 5000.0f;
+    return bodyInterface.CreateAndAddBody(settings, JPH::EActivation::Activate);
+}
 
 void AccumulateAfloat(const std::vector<CargoShip>& ships, int& ironAfloat, int& steelAfloat) {
     for (const CargoShip& s : ships) {
@@ -491,8 +575,8 @@ bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const War
 // Buys on whichever leg has fewer of its own ships, so it doesn't lopsidedly
 // pile onto one route. Same $500 cost, same capacity as the player pays —
 // no hidden bonuses (principios 16-18).
-void RunAiDecisionLogic(Economy& aiEconomy, std::vector<CargoShip>& aiShips, int shipCapacity, double shipCost,
-                         Vec3 island1Dock, Vec3 island2Dock, int maxShips) {
+void RunAiDecisionLogic(JPH::BodyInterface& bodyInterface, Economy& aiEconomy, std::vector<CargoShip>& aiShips,
+                         int shipCapacity, double shipCost, Vec3 island1Dock, Vec3 island2Dock, int maxShips) {
     if (static_cast<int>(aiShips.size()) >= maxShips) return;
     if (aiEconomy.cash() < shipCost * 2.0) return;
 
@@ -506,9 +590,11 @@ void RunAiDecisionLogic(Economy& aiEconomy, std::vector<CargoShip>& aiShips, int
     }
 
     if (ironShips <= steelShips) {
-        aiShips.emplace_back(shipCapacity, island1Dock, RouteKind::IronRoute);
+        aiShips.emplace_back(bodyInterface, CreateShipBody(bodyInterface, island1Dock), shipCapacity,
+                              RouteKind::IronRoute);
     } else {
-        aiShips.emplace_back(shipCapacity, island2Dock, RouteKind::SteelRoute);
+        aiShips.emplace_back(bodyInterface, CreateShipBody(bodyInterface, island2Dock), shipCapacity,
+                              RouteKind::SteelRoute);
     }
     aiEconomy.ChargeExpense(shipCost);
     std::cout << "AI company bought a ship (fleet size now " << aiShips.size() << ")\n";
@@ -531,7 +617,8 @@ void WriteFleet(std::ofstream& out, const std::vector<CargoShip>& ships) {
     }
 }
 
-bool ReadFleet(std::ifstream& in, std::vector<CargoShip>& outShips, int shipCapacity) {
+bool ReadFleet(JPH::BodyInterface& bodyInterface, std::ifstream& in, std::vector<CargoShip>& outShips,
+               int shipCapacity) {
     size_t shipCount = 0;
     in >> shipCount;
     std::vector<CargoShip> loaded;
@@ -549,7 +636,7 @@ bool ReadFleet(std::ifstream& in, std::vector<CargoShip>& outShips, int shipCapa
         Resource cargoResource =
             (cargoResourceInt == static_cast<int>(Resource::Iron)) ? Resource::Iron : Resource::Steel;
 
-        CargoShip s(shipCapacity, pos, kind);
+        CargoShip s(bodyInterface, CreateShipBody(bodyInterface, pos), shipCapacity, kind);
         s.SetState(pos, vel, heading, angularVelocity, cargo, cargoResource);
         loaded.push_back(s);
     }
@@ -583,9 +670,10 @@ void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const Stee
                << " player ships, " << aiShips.size() << " AI ships)\n";
 }
 
-bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mill, Warehouse& island1Warehouse,
-              Warehouse& island2Warehouse, std::vector<CargoShip>& playerShips, std::vector<CargoShip>& aiShips,
-              Port& port, Market& market, Economy& economy, Economy& aiEconomy, int shipCapacity) {
+bool LoadGame(JPH::BodyInterface& bodyInterface, int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mill,
+              Warehouse& island1Warehouse, Warehouse& island2Warehouse, std::vector<CargoShip>& playerShips,
+              std::vector<CargoShip>& aiShips, Port& port, Market& market, Economy& economy, Economy& aiEconomy,
+              int shipCapacity) {
     std::ifstream in(kSaveFile);
     if (!in) {
         std::cerr << "LoadGame: could not open " << kSaveFile << "\n";
@@ -621,8 +709,8 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
 
     std::vector<CargoShip> loadedPlayerShips;
     std::vector<CargoShip> loadedAiShips;
-    bool okPlayer = ReadFleet(in, loadedPlayerShips, shipCapacity);
-    bool okAi = ReadFleet(in, loadedAiShips, shipCapacity);
+    bool okPlayer = ReadFleet(bodyInterface, in, loadedPlayerShips, shipCapacity);
+    bool okAi = ReadFleet(bodyInterface, in, loadedAiShips, shipCapacity);
 
     if (!in || !okPlayer || !okAi) {
         std::cerr << "LoadGame: save file is truncated or malformed\n";
@@ -931,12 +1019,35 @@ bool WorldToScreen(Vec3 worldPos, const glm::mat4& viewProj, ImVec2& outScreen) 
     return true;
 }
 
+
 }  // namespace archipelago
 
 int main(int argc, char** argv) {
     using namespace archipelago;
     (void)argc;
     (void)argv;
+
+    // Jolt Physics world — set up once, lives for the whole program. See
+    // "Fase 7.0 - Motor de fisica real (Jolt)" en el vault.
+    JPH::RegisterDefaultAllocator();
+    JPH::Factory::sInstance = new JPH::Factory();
+    JPH::RegisterTypes();
+
+    JPH::TempAllocatorImpl physicsTempAllocator(10 * 1024 * 1024);
+    unsigned int physicsWorkerThreads = std::max(
+        1u, std::thread::hardware_concurrency() > 1 ? std::thread::hardware_concurrency() - 1 : 1u);
+    JPH::JobSystemThreadPool physicsJobSystem(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
+                                               static_cast<int>(physicsWorkerThreads));
+
+    JoltBroadPhaseLayerInterface broadPhaseLayerInterface;
+    JoltObjectVsBroadPhaseLayerFilter objectVsBroadPhaseFilter;
+    JoltObjectLayerPairFilter objectLayerPairFilter;
+
+    JPH::PhysicsSystem physicsSystem;
+    physicsSystem.Init(/*maxBodies=*/1024, /*numBodyMutexes=*/0, /*maxBodyPairs=*/1024,
+                        /*maxContactConstraints=*/1024, broadPhaseLayerInterface, objectVsBroadPhaseFilter,
+                        objectLayerPairFilter);
+    JPH::BodyInterface& bodyInterface = physicsSystem.GetBodyInterface();
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
@@ -1041,10 +1152,14 @@ int main(int argc, char** argv) {
     const Vec3 island3Dock{4450, 0, 150};
 
     std::vector<CargoShip> playerShips;
-    playerShips.emplace_back(kShipCapacity, island2Dock, RouteKind::SteelRoute);
+    playerShips.emplace_back(bodyInterface, CreateShipBody(bodyInterface, island2Dock), kShipCapacity,
+                              RouteKind::SteelRoute);
 
     std::vector<CargoShip> aiShips;
-    aiShips.emplace_back(kShipCapacity, island1Dock, RouteKind::IronRoute);
+    aiShips.emplace_back(bodyInterface, CreateShipBody(bodyInterface, island1Dock), kShipCapacity,
+                          RouteKind::IronRoute);
+
+    physicsSystem.OptimizeBroadPhase();
 
     CameraMode cameraMode = CameraMode::ThirdPerson;
     bool cWasDown = false;
@@ -1099,8 +1214,8 @@ int main(int argc, char** argv) {
 
         bool f9IsDown = keys[SDL_SCANCODE_F9];
         if (f9IsDown && !f9WasDown) {
-            if (LoadGame(hour, hourAccumulator, mine, mill, island1Warehouse, island2Warehouse, playerShips, aiShips,
-                         port, market, economy, aiEconomy, kShipCapacity)) {
+            if (LoadGame(bodyInterface, hour, hourAccumulator, mine, mill, island1Warehouse, island2Warehouse,
+                         playerShips, aiShips, port, market, economy, aiEconomy, kShipCapacity)) {
                 lastSaveLoadMessage = "Cargado (hora " + std::to_string(hour) + ")";
             } else {
                 lastSaveLoadMessage = "Error al cargar (ver consola)";
@@ -1183,10 +1298,12 @@ int main(int argc, char** argv) {
             }
 
             if (buyAction == 1) {
-                playerShips.emplace_back(kShipCapacity, island1Dock, RouteKind::IronRoute);
+                playerShips.emplace_back(bodyInterface, CreateShipBody(bodyInterface, island1Dock), kShipCapacity,
+                                          RouteKind::IronRoute);
                 economy.ChargeExpense(kShipPurchaseCost);
             } else if (buyAction == 2) {
-                playerShips.emplace_back(kShipCapacity, island2Dock, RouteKind::SteelRoute);
+                playerShips.emplace_back(bodyInterface, CreateShipBody(bodyInterface, island2Dock), kShipCapacity,
+                                          RouteKind::SteelRoute);
                 economy.ChargeExpense(kShipPurchaseCost);
             }
 
@@ -1197,20 +1314,30 @@ int main(int argc, char** argv) {
             // in the player's fleet runs on autopilot, shuttling its assigned
             // pair of docks — same as every ship in the rival AI company's
             // fleet (Fase 5.1), which is bot-only, no manual control at all.
-            playerShips[0].ApplyInput(thrustForward, thrustBackward, turnLeft, turnRight, kFixedDt);
+            playerShips[0].ApplyInput(thrustForward, thrustBackward, turnLeft, turnRight);
             for (size_t i = 1; i < playerShips.size(); ++i) {
-                playerShips[i].AutoPilot(kFixedDt, island1Dock, island2Dock, island3Dock);
+                playerShips[i].AutoPilot(island1Dock, island2Dock, island3Dock);
             }
+            for (CargoShip& s : aiShips) {
+                s.AutoPilot(island1Dock, island2Dock, island3Dock);
+            }
+
+            // One physics step for every body in the world, then per-ship
+            // game logic reads back the settled position/velocity — see
+            // "Fase 7.0" comment on ClampSpeed()/HandleDocking().
+            physicsSystem.Update(static_cast<float>(kFixedDt), 1, &physicsTempAllocator, &physicsJobSystem);
+
             for (size_t i = 0; i < playerShips.size(); ++i) {
                 bool isBot = (i != 0);
-                playerShips[i].Update(kFixedDt, island1Warehouse, island2Warehouse, market, economy, port,
-                                       island1Dock, island2Dock, island3Dock, isBot);
+                playerShips[i].ClampSpeed();
+                playerShips[i].HandleDocking(island1Warehouse, island2Warehouse, market, economy, port, island1Dock,
+                                              island2Dock, island3Dock, isBot);
             }
 
             for (CargoShip& s : aiShips) {
-                s.AutoPilot(kFixedDt, island1Dock, island2Dock, island3Dock);
-                s.Update(kFixedDt, island1Warehouse, island2Warehouse, market, aiEconomy, port, island1Dock,
-                         island2Dock, island3Dock, /*isBot=*/true);
+                s.ClampSpeed();
+                s.HandleDocking(island1Warehouse, island2Warehouse, market, aiEconomy, port, island1Dock, island2Dock,
+                                 island3Dock, /*isBot=*/true);
             }
 
             hourAccumulator += kFixedDt;
@@ -1226,8 +1353,8 @@ int main(int argc, char** argv) {
                 double aiMaintenance =
                     kBaseMaintenanceCost + kPerShipMaintenanceCost * static_cast<double>(aiShips.size());
                 aiEconomy.ChargeExpense(aiMaintenance);
-                RunAiDecisionLogic(aiEconomy, aiShips, kShipCapacity, kShipPurchaseCost, island1Dock, island2Dock,
-                                    kAiMaxShips);
+                RunAiDecisionLogic(bodyInterface, aiEconomy, aiShips, kShipCapacity, kShipPurchaseCost, island1Dock,
+                                    island2Dock, kAiMaxShips);
                 if (!CheckMaterialBalance(mine, mill, island1Warehouse, island2Warehouse, playerShips, aiShips, port,
                                            hour)) {
                     running = false;
@@ -1386,6 +1513,10 @@ int main(int argc, char** argv) {
     SDL_GL_DestroyContext(glContext);
     SDL_DestroyWindow(window);
     SDL_Quit();
+
+    JPH::UnregisterTypes();
+    delete JPH::Factory::sInstance;
+    JPH::Factory::sInstance = nullptr;
 
     return EXIT_SUCCESS;
 }

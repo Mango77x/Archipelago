@@ -22,4 +22,11 @@ Insertada a petición explícita del usuario: quiere oleaje y boyantez de verdad
 
 **Definition of Done de este paso**: el barco del jugador y los de la IA se mueven mediante fuerzas físicas reales de Jolt (no velocidad modificada a mano), sin regresión de manejo perceptible respecto al modelo cinemático anterior, sobre agua todavía plana.
 
+**Estado de los 3 pasos**:
+1. ✅ Dependencia añadida (vcpkg `joltphysics`, `find_package(Jolt CONFIG REQUIRED)`).
+2. ✅ Validado con cuerpo de prueba (caja cayendo por gravedad sobre un suelo, se asienta correctamente) — motor compila, enlaza y simula bien.
+3. ✅ Código migrado: `CargoShip` ya no guarda posición/velocidad/rumbo a mano — es un wrapper fino sobre un `JPH::BodyID` (cuerpo dinámico, gravedad desactivada, grados de libertad restringidos a X/Z + guiñada, igual que el modelo anterior). Empuje y giro se aplican como `AddForce`/`AddTorque` reales; `PhysicsSystem::Update()` corre una vez por paso fijo para todos los cuerpos; el resto de la lógica de juego (atraque, guardado/carga, IA, replay) se actualizó para leer posición/velocidad desde el cuerpo físico en vez de campos propios. Compila limpio y corre 40+ horas simuladas sin romper el balance de materiales ni crashear.
+
+**Pendiente de confirmar por el usuario** (no puedo verlo yo mismo — la app es una ventana 3D interactiva): que el manejo por física realmente "se siente bien" (empuje, giro, llegar a los muelles) comparado con el modelo cinemático anterior. Hasta que el usuario lo pruebe y lo confirme, este paso no se da por cerrado del todo pese a que el código y la compilación ya están listos.
+
 Anterior: [[Fase 5 - Primera empresa de IA]] (con [[Fase 6 - Gobiernos|Fase 6]] aplazada). Siguiente: Fase 7.1 — Oleaje y boyantez (a definir tras cerrar este paso).
