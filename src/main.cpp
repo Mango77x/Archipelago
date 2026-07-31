@@ -204,7 +204,10 @@ class Economy {
 public:
     explicit Economy(double startingCash) : cash_(startingCash) {}
 
-    void AddRevenue(double amount) { cash_ += amount; }
+    void AddRevenue(double amount) {
+        cash_ += amount;
+        totalRevenue_ += amount;
+    }
     void ChargeExpense(double amount) {
         cash_ -= amount;
         totalExpenses_ += amount;
@@ -212,15 +215,18 @@ public:
 
     double cash() const { return cash_; }
     double totalExpenses() const { return totalExpenses_; }
+    double totalRevenue() const { return totalRevenue_; }
 
-    void SetState(double cash, double totalExpenses) {
+    void SetState(double cash, double totalExpenses, double totalRevenue) {
         cash_ = cash;
         totalExpenses_ = totalExpenses;
+        totalRevenue_ = totalRevenue;
     }
 
 private:
     double cash_;
     double totalExpenses_ = 0.0;
+    double totalRevenue_ = 0.0;
 };
 
 // World positions live in 3D now (Fase 4.5): X/Z is the horizontal plane
@@ -443,15 +449,7 @@ private:
     RouteKind routeKind_;
 };
 
-// Invariant that must hold every simulated hour: every unit of Iron/Steel
-// ever produced is accounted for either in an island's warehouse, riding a
-// ship, or already exported. Phase 0's one failure mode to catch, still true
-// across two warehouses and a fleet in Phase 4.
-bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const Warehouse& island1Warehouse,
-                           const Warehouse& island2Warehouse, const std::vector<CargoShip>& ships, const Port& port,
-                           int hour) {
-    int ironAfloat = 0;
-    int steelAfloat = 0;
+void AccumulateAfloat(const std::vector<CargoShip>& ships, int& ironAfloat, int& steelAfloat) {
     for (const CargoShip& s : ships) {
         if (s.cargo() <= 0) continue;
         if (s.cargoResource() == Resource::Iron) {
@@ -460,6 +458,19 @@ bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const War
             steelAfloat += s.cargo();
         }
     }
+}
+
+// Invariant that must hold every simulated hour: every unit of Iron/Steel
+// ever produced is accounted for either in an island's warehouse, riding a
+// ship (player's or the AI company's — they draw from the same two
+// warehouses, see Fase 5.1), or already exported.
+bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const Warehouse& island1Warehouse,
+                           const Warehouse& island2Warehouse, const std::vector<CargoShip>& playerShips,
+                           const std::vector<CargoShip>& aiShips, const Port& port, int hour) {
+    int ironAfloat = 0;
+    int steelAfloat = 0;
+    AccumulateAfloat(playerShips, ironAfloat, steelAfloat);
+    AccumulateAfloat(aiShips, ironAfloat, steelAfloat);
 
     int ironBalance = mine.totalProduced() - mill.totalConsumed() - island1Warehouse.Get(Resource::Iron) -
                        island2Warehouse.Get(Resource::Iron) - ironAfloat;
@@ -474,15 +485,83 @@ bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const War
     return true;
 }
 
+// Simple rule-based expansion, not a learned/adaptive AI — honest for a
+// first sub-phase (principio 19: "decisiones de IA emergen de objetivos...
+// cuando sea practico" is aspirational for a later Fase 5.x, not this one).
+// Buys on whichever leg has fewer of its own ships, so it doesn't lopsidedly
+// pile onto one route. Same $500 cost, same capacity as the player pays —
+// no hidden bonuses (principios 16-18).
+void RunAiDecisionLogic(Economy& aiEconomy, std::vector<CargoShip>& aiShips, int shipCapacity, double shipCost,
+                         Vec3 island1Dock, Vec3 island2Dock, int maxShips) {
+    if (static_cast<int>(aiShips.size()) >= maxShips) return;
+    if (aiEconomy.cash() < shipCost * 2.0) return;
+
+    int ironShips = 0, steelShips = 0;
+    for (const CargoShip& s : aiShips) {
+        if (s.routeKind() == RouteKind::IronRoute) {
+            ++ironShips;
+        } else {
+            ++steelShips;
+        }
+    }
+
+    if (ironShips <= steelShips) {
+        aiShips.emplace_back(shipCapacity, island1Dock, RouteKind::IronRoute);
+    } else {
+        aiShips.emplace_back(shipCapacity, island2Dock, RouteKind::SteelRoute);
+    }
+    aiEconomy.ChargeExpense(shipCost);
+    std::cout << "AI company bought a ship (fleet size now " << aiShips.size() << ")\n";
+}
+
 // --- Save/Load: plain-text state dump. Debugging tool first, save format
 // second — a human can open this file and see exactly what broke. ---
 
 constexpr const char* kSaveFile = "archipelago_save.txt";
-constexpr const char* kSaveHeader = "ARCHIPELAGO_SAVE_V4";
+constexpr const char* kSaveHeader = "ARCHIPELAGO_SAVE_V5";
+
+void WriteFleet(std::ofstream& out, const std::vector<CargoShip>& ships) {
+    out << ships.size() << "\n";
+    for (const CargoShip& s : ships) {
+        Vec3 pos = s.position();
+        Vec3 vel = s.velocity();
+        out << pos.x << " " << pos.y << " " << pos.z << " " << vel.x << " " << vel.y << " " << vel.z << " "
+            << s.heading() << " " << s.angularVelocity() << " " << s.cargo() << " "
+            << static_cast<int>(s.cargoResource()) << " " << static_cast<int>(s.routeKind()) << "\n";
+    }
+}
+
+bool ReadFleet(std::ifstream& in, std::vector<CargoShip>& outShips, int shipCapacity) {
+    size_t shipCount = 0;
+    in >> shipCount;
+    std::vector<CargoShip> loaded;
+    for (size_t i = 0; i < shipCount && in; ++i) {
+        Vec3 pos{}, vel{};
+        float heading = 0.0f, angularVelocity = 0.0f;
+        int cargo = 0;
+        int cargoResourceInt = 0;
+        int routeKindInt = 0;
+        in >> pos.x >> pos.y >> pos.z >> vel.x >> vel.y >> vel.z >> heading >> angularVelocity >> cargo >>
+            cargoResourceInt >> routeKindInt;
+
+        RouteKind kind =
+            (routeKindInt == static_cast<int>(RouteKind::IronRoute)) ? RouteKind::IronRoute : RouteKind::SteelRoute;
+        Resource cargoResource =
+            (cargoResourceInt == static_cast<int>(Resource::Iron)) ? Resource::Iron : Resource::Steel;
+
+        CargoShip s(shipCapacity, pos, kind);
+        s.SetState(pos, vel, heading, angularVelocity, cargo, cargoResource);
+        loaded.push_back(s);
+    }
+    if (!in || loaded.size() != shipCount) return false;
+    outShips = std::move(loaded);
+    return true;
+}
 
 void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const SteelMill& mill,
               const Warehouse& island1Warehouse, const Warehouse& island2Warehouse,
-              const std::vector<CargoShip>& ships, const Port& port, const Market& market, const Economy& economy) {
+              const std::vector<CargoShip>& playerShips, const std::vector<CargoShip>& aiShips, const Port& port,
+              const Market& market, const Economy& economy, const Economy& aiEconomy) {
     std::ofstream out(kSaveFile);
     if (!out) {
         std::cerr << "SaveGame: could not open " << kSaveFile << " for writing\n";
@@ -496,21 +575,17 @@ void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const Stee
     out << island2Warehouse.Get(Resource::Iron) << " " << island2Warehouse.Get(Resource::Steel) << "\n";
     out << port.totalExported() << "\n";
     out << market.stock() << " " << market.totalRevenue() << " " << market.totalSold() << "\n";
-    out << economy.cash() << " " << economy.totalExpenses() << "\n";
-    out << ships.size() << "\n";
-    for (const CargoShip& s : ships) {
-        Vec3 pos = s.position();
-        Vec3 vel = s.velocity();
-        out << pos.x << " " << pos.y << " " << pos.z << " " << vel.x << " " << vel.y << " " << vel.z << " "
-            << s.heading() << " " << s.angularVelocity() << " " << s.cargo() << " "
-            << static_cast<int>(s.cargoResource()) << " " << static_cast<int>(s.routeKind()) << "\n";
-    }
-    std::cout << "Game saved to " << kSaveFile << " (hour " << hour << ", " << ships.size() << " ships)\n";
+    out << economy.cash() << " " << economy.totalExpenses() << " " << economy.totalRevenue() << "\n";
+    out << aiEconomy.cash() << " " << aiEconomy.totalExpenses() << " " << aiEconomy.totalRevenue() << "\n";
+    WriteFleet(out, playerShips);
+    WriteFleet(out, aiShips);
+    std::cout << "Game saved to " << kSaveFile << " (hour " << hour << ", " << playerShips.size()
+               << " player ships, " << aiShips.size() << " AI ships)\n";
 }
 
 bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mill, Warehouse& island1Warehouse,
-              Warehouse& island2Warehouse, std::vector<CargoShip>& ships, Port& port, Market& market,
-              Economy& economy, int shipCapacity) {
+              Warehouse& island2Warehouse, std::vector<CargoShip>& playerShips, std::vector<CargoShip>& aiShips,
+              Port& port, Market& market, Economy& economy, Economy& aiEconomy, int shipCapacity) {
     std::ifstream in(kSaveFile);
     if (!in) {
         std::cerr << "LoadGame: could not open " << kSaveFile << "\n";
@@ -531,8 +606,8 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
     float marketStock = 0.0f;
     double marketRevenue = 0.0;
     int marketSold = 0;
-    double cash = 0.0, totalExpenses = 0.0;
-    size_t shipCount = 0;
+    double cash = 0.0, totalExpenses = 0.0, totalRevenue = 0.0;
+    double aiCash = 0.0, aiTotalExpenses = 0.0, aiTotalRevenue = 0.0;
 
     in >> hour >> hourAccumulator;
     in >> mineProduced;
@@ -541,30 +616,15 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
     in >> island2Iron >> island2Steel;
     in >> exported;
     in >> marketStock >> marketRevenue >> marketSold;
-    in >> cash >> totalExpenses;
-    in >> shipCount;
+    in >> cash >> totalExpenses >> totalRevenue;
+    in >> aiCash >> aiTotalExpenses >> aiTotalRevenue;
 
-    std::vector<CargoShip> loadedShips;
-    for (size_t i = 0; i < shipCount && in; ++i) {
-        Vec3 pos{}, vel{};
-        float heading = 0.0f, angularVelocity = 0.0f;
-        int cargo = 0;
-        int cargoResourceInt = 0;
-        int routeKindInt = 0;
-        in >> pos.x >> pos.y >> pos.z >> vel.x >> vel.y >> vel.z >> heading >> angularVelocity >> cargo >>
-            cargoResourceInt >> routeKindInt;
+    std::vector<CargoShip> loadedPlayerShips;
+    std::vector<CargoShip> loadedAiShips;
+    bool okPlayer = ReadFleet(in, loadedPlayerShips, shipCapacity);
+    bool okAi = ReadFleet(in, loadedAiShips, shipCapacity);
 
-        RouteKind kind =
-            (routeKindInt == static_cast<int>(RouteKind::IronRoute)) ? RouteKind::IronRoute : RouteKind::SteelRoute;
-        Resource cargoResource =
-            (cargoResourceInt == static_cast<int>(Resource::Iron)) ? Resource::Iron : Resource::Steel;
-
-        CargoShip s(shipCapacity, pos, kind);
-        s.SetState(pos, vel, heading, angularVelocity, cargo, cargoResource);
-        loadedShips.push_back(s);
-    }
-
-    if (!in || loadedShips.size() != shipCount) {
+    if (!in || !okPlayer || !okAi) {
         std::cerr << "LoadGame: save file is truncated or malformed\n";
         return false;
     }
@@ -577,10 +637,13 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
     island2Warehouse.SetStock(Resource::Steel, island2Steel);
     port.SetTotalExported(exported);
     market.SetState(marketStock, marketRevenue, marketSold);
-    economy.SetState(cash, totalExpenses);
-    ships = std::move(loadedShips);
+    economy.SetState(cash, totalExpenses, totalRevenue);
+    aiEconomy.SetState(aiCash, aiTotalExpenses, aiTotalRevenue);
+    playerShips = std::move(loadedPlayerShips);
+    aiShips = std::move(loadedAiShips);
 
-    std::cout << "Game loaded from " << kSaveFile << " (hour " << hour << ", " << ships.size() << " ships)\n";
+    std::cout << "Game loaded from " << kSaveFile << " (hour " << hour << ", " << playerShips.size()
+               << " player ships, " << aiShips.size() << " AI ships)\n";
     return true;
 }
 
@@ -964,6 +1027,12 @@ int main(int argc, char** argv) {
     constexpr double kShipPurchaseCost = 500.0;
     constexpr int kShipCapacity = 20;
 
+    // Fase 5.1: a rival AI company, same starting cash, same costs, same
+    // market — it competes with the player for the same finite Hierro/Acero
+    // supply and the same Mercado, no hidden bonuses (principios 16-18).
+    Economy aiEconomy(/*startingCash=*/2000.0);
+    constexpr int kAiMaxShips = 5;
+
     const Vec3 minePos{300, 0, 300};
     const Vec3 island1Dock{450, 0, 300};
     const Vec3 millPos{2200, 0, 450};
@@ -971,8 +1040,11 @@ int main(int argc, char** argv) {
     const Vec3 portPos{4300, 0, 150};
     const Vec3 island3Dock{4450, 0, 150};
 
-    std::vector<CargoShip> ships;
-    ships.emplace_back(kShipCapacity, island2Dock, RouteKind::SteelRoute);
+    std::vector<CargoShip> playerShips;
+    playerShips.emplace_back(kShipCapacity, island2Dock, RouteKind::SteelRoute);
+
+    std::vector<CargoShip> aiShips;
+    aiShips.emplace_back(kShipCapacity, island1Dock, RouteKind::IronRoute);
 
     CameraMode cameraMode = CameraMode::ThirdPerson;
     bool cWasDown = false;
@@ -1019,16 +1091,16 @@ int main(int argc, char** argv) {
 
         bool f5IsDown = keys[SDL_SCANCODE_F5];
         if (f5IsDown && !f5WasDown) {
-            SaveGame(hour, hourAccumulator, mine, mill, island1Warehouse, island2Warehouse, ships, port, market,
-                     economy);
+            SaveGame(hour, hourAccumulator, mine, mill, island1Warehouse, island2Warehouse, playerShips, aiShips,
+                     port, market, economy, aiEconomy);
             lastSaveLoadMessage = "Guardado (hora " + std::to_string(hour) + ")";
         }
         f5WasDown = f5IsDown;
 
         bool f9IsDown = keys[SDL_SCANCODE_F9];
         if (f9IsDown && !f9WasDown) {
-            if (LoadGame(hour, hourAccumulator, mine, mill, island1Warehouse, island2Warehouse, ships, port, market,
-                         economy, kShipCapacity)) {
+            if (LoadGame(hour, hourAccumulator, mine, mill, island1Warehouse, island2Warehouse, playerShips, aiShips,
+                         port, market, economy, aiEconomy, kShipCapacity)) {
                 lastSaveLoadMessage = "Cargado (hora " + std::to_string(hour) + ")";
             } else {
                 lastSaveLoadMessage = "Error al cargar (ver consola)";
@@ -1111,10 +1183,10 @@ int main(int argc, char** argv) {
             }
 
             if (buyAction == 1) {
-                ships.emplace_back(kShipCapacity, island1Dock, RouteKind::IronRoute);
+                playerShips.emplace_back(kShipCapacity, island1Dock, RouteKind::IronRoute);
                 economy.ChargeExpense(kShipPurchaseCost);
             } else if (buyAction == 2) {
-                ships.emplace_back(kShipCapacity, island2Dock, RouteKind::SteelRoute);
+                playerShips.emplace_back(kShipCapacity, island2Dock, RouteKind::SteelRoute);
                 economy.ChargeExpense(kShipPurchaseCost);
             }
 
@@ -1122,16 +1194,23 @@ int main(int argc, char** argv) {
             // pilot one hull at a time (see "Encarnacion y capa de mando" en
             // el vault). Fly it to any island; loading/unloading just works
             // based on proximity and what you're carrying. Every other ship
-            // in the fleet runs on autopilot, shuttling its assigned pair of
-            // docks.
-            ships[0].ApplyInput(thrustForward, thrustBackward, turnLeft, turnRight, kFixedDt);
-            for (size_t i = 1; i < ships.size(); ++i) {
-                ships[i].AutoPilot(kFixedDt, island1Dock, island2Dock, island3Dock);
+            // in the player's fleet runs on autopilot, shuttling its assigned
+            // pair of docks — same as every ship in the rival AI company's
+            // fleet (Fase 5.1), which is bot-only, no manual control at all.
+            playerShips[0].ApplyInput(thrustForward, thrustBackward, turnLeft, turnRight, kFixedDt);
+            for (size_t i = 1; i < playerShips.size(); ++i) {
+                playerShips[i].AutoPilot(kFixedDt, island1Dock, island2Dock, island3Dock);
             }
-            for (size_t i = 0; i < ships.size(); ++i) {
+            for (size_t i = 0; i < playerShips.size(); ++i) {
                 bool isBot = (i != 0);
-                ships[i].Update(kFixedDt, island1Warehouse, island2Warehouse, market, economy, port, island1Dock,
-                                 island2Dock, island3Dock, isBot);
+                playerShips[i].Update(kFixedDt, island1Warehouse, island2Warehouse, market, economy, port,
+                                       island1Dock, island2Dock, island3Dock, isBot);
+            }
+
+            for (CargoShip& s : aiShips) {
+                s.AutoPilot(kFixedDt, island1Dock, island2Dock, island3Dock);
+                s.Update(kFixedDt, island1Warehouse, island2Warehouse, market, aiEconomy, port, island1Dock,
+                         island2Dock, island3Dock, /*isBot=*/true);
             }
 
             hourAccumulator += kFixedDt;
@@ -1142,16 +1221,22 @@ int main(int argc, char** argv) {
                 mill.Tick(island2Warehouse, hour);
                 market.Tick(hour);
                 double maintenance =
-                    kBaseMaintenanceCost + kPerShipMaintenanceCost * static_cast<double>(ships.size());
+                    kBaseMaintenanceCost + kPerShipMaintenanceCost * static_cast<double>(playerShips.size());
                 economy.ChargeExpense(maintenance);
-                if (!CheckMaterialBalance(mine, mill, island1Warehouse, island2Warehouse, ships, port, hour)) {
+                double aiMaintenance =
+                    kBaseMaintenanceCost + kPerShipMaintenanceCost * static_cast<double>(aiShips.size());
+                aiEconomy.ChargeExpense(aiMaintenance);
+                RunAiDecisionLogic(aiEconomy, aiShips, kShipCapacity, kShipPurchaseCost, island1Dock, island2Dock,
+                                    kAiMaxShips);
+                if (!CheckMaterialBalance(mine, mill, island1Warehouse, island2Warehouse, playerShips, aiShips, port,
+                                           hour)) {
                     running = false;
                 }
             }
         }
 
         float aspect = static_cast<float>(kWindowWidth) / static_cast<float>(kWindowHeight);
-        glm::mat4 viewProj = ComputeViewProj(cameraMode, ships[0].position(), ships[0].heading(), aspect);
+        glm::mat4 viewProj = ComputeViewProj(cameraMode, playerShips[0].position(), playerShips[0].heading(), aspect);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glUseProgram(litShaderProgram);
@@ -1168,12 +1253,17 @@ int main(int argc, char** argv) {
         DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, portPos + Vec3{0, 40, 0},
                 Vec3{120, 80, 80}, 0.0f, 0.2f, 0.4f, 0.8f);
 
-        for (size_t i = 0; i < ships.size(); ++i) {
-            const CargoShip& s = ships[i];
+        for (size_t i = 0; i < playerShips.size(); ++i) {
+            const CargoShip& s = playerShips[i];
             // Don't draw your own hull in first-person — you're standing inside it.
             if (i == 0 && cameraMode == CameraMode::FirstPerson) continue;
             DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, s.position() + Vec3{0, 8, 0},
                     Vec3{48, 16, 24}, s.heading(), 0.9f, 0.9f, 0.2f);
+        }
+        for (const CargoShip& s : aiShips) {
+            // Rival AI hulls in a distinct reddish color so they read as "not yours" at a glance.
+            DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, s.position() + Vec3{0, 8, 0},
+                    Vec3{48, 16, 24}, s.heading(), 0.85f, 0.25f, 0.2f);
         }
 
         glUseProgram(unlitShaderProgram);
@@ -1210,7 +1300,8 @@ int main(int argc, char** argv) {
         ImGui::Text("Aceria: %s", mill.isIdle() ? "PARADA (sin Hierro)" : "activa");
         ImGui::Text("Isla 3 (Puerto) - exportado total: %d", port.totalExported());
         ImGui::Separator();
-        ImGui::Text("Tu barco - carga: %d %s", ships[0].cargo(), ToString(ships[0].cargoResource()).c_str());
+        ImGui::Text("Tu barco - carga: %d %s", playerShips[0].cargo(),
+                    ToString(playerShips[0].cargoResource()).c_str());
         ImGui::Separator();
         ImGui::Text("Hierro producido total: %d", mine.totalProduced());
         ImGui::Text("Acero producido total:  %d", mill.totalProduced());
@@ -1218,13 +1309,14 @@ int main(int argc, char** argv) {
         ImGui::Text("Caja: $%.2f", economy.cash());
         ImGui::Text("Precio Acero: $%.2f/unidad", market.CurrentPrice());
         ImGui::Text("Stock de mercado: %.1f", market.stock());
-        ImGui::Text("Ingresos totales: $%.2f", market.totalRevenue());
-        double currentMaintenance = kBaseMaintenanceCost + kPerShipMaintenanceCost * static_cast<double>(ships.size());
+        ImGui::Text("Ingresos totales (mercado): $%.2f", market.totalRevenue());
+        double currentMaintenance =
+            kBaseMaintenanceCost + kPerShipMaintenanceCost * static_cast<double>(playerShips.size());
         ImGui::Text("Gastos totales: $%.2f (mantenimiento $%.0f/hora con %zu barco%s)", economy.totalExpenses(),
-                    currentMaintenance, ships.size(), ships.size() == 1 ? "" : "s");
+                    currentMaintenance, playerShips.size(), playerShips.size() == 1 ? "" : "s");
         ImGui::Separator();
-        ImGui::Text("Flota: %zu barco%s (autopilotados todos salvo el tuyo)", ships.size(),
-                    ships.size() == 1 ? "" : "s");
+        ImGui::Text("Flota: %zu barco%s (autopilotados todos salvo el tuyo)", playerShips.size(),
+                    playerShips.size() == 1 ? "" : "s");
         ImGui::BeginDisabled(economy.cash() < kShipPurchaseCost);
         if (ImGui::Button("Comprar barco - Ruta Hierro Isla1->2 ($500)")) {
             pendingBuyAction = 1;
@@ -1235,6 +1327,19 @@ int main(int argc, char** argv) {
             lastSaveLoadMessage = "";
         }
         ImGui::EndDisabled();
+        ImGui::Separator();
+        ImGui::Text("Empresa rival (IA):");
+        ImGui::Text("Caja: $%.2f", aiEconomy.cash());
+        ImGui::Text("Ingresos: $%.2f   Gastos: $%.2f", aiEconomy.totalRevenue(), aiEconomy.totalExpenses());
+        int aiIronShips = 0, aiSteelShips = 0;
+        for (const CargoShip& s : aiShips) {
+            if (s.routeKind() == RouteKind::IronRoute) {
+                ++aiIronShips;
+            } else {
+                ++aiSteelShips;
+            }
+        }
+        ImGui::Text("Flota: %zu barcos (%d ruta Hierro, %d ruta Acero)", aiShips.size(), aiIronShips, aiSteelShips);
         ImGui::Separator();
         ImGui::Text("F5: guardar   F9: cargar");
         if (!lastSaveLoadMessage.empty()) {
@@ -1267,9 +1372,10 @@ int main(int argc, char** argv) {
     std::cout << "Total Iron produced: " << mine.totalProduced() << "\n";
     std::cout << "Total Steel produced: " << mill.totalProduced() << "\n";
     std::cout << "Total Steel exported: " << port.totalExported() << "\n";
-    std::cout << "Total revenue: $" << market.totalRevenue() << "\n";
-    std::cout << "Total expenses: $" << economy.totalExpenses() << "\n";
-    std::cout << "Final cash: $" << economy.cash() << "\n";
+    std::cout << "Total revenue (market): $" << market.totalRevenue() << "\n";
+    std::cout << "Player - expenses: $" << economy.totalExpenses() << ", final cash: $" << economy.cash() << "\n";
+    std::cout << "AI company - expenses: $" << aiEconomy.totalExpenses() << ", final cash: $" << aiEconomy.cash()
+               << ", fleet size: " << aiShips.size() << "\n";
 
     glDeleteBuffers(1, &cubeVbo);
     glDeleteVertexArrays(1, &cubeVao);

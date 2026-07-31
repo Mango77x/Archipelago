@@ -63,6 +63,7 @@ Este vault tiene dos partes que no deben confundirse:
 - [[Fase 4 - Logística multi-isla]]
 - [[Fase 4.5 - Migración a 3D]]
 - [[Fase 5 - Primera empresa de IA]]
+- [[Fase 5.1 - Competidor con capital propio]]
 - [[Fase 6 - Gobiernos]]
 - [[Fase 7 - Entorno]]
 - [[Fase 8 - Mundo procedural]]
