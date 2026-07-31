@@ -1,10 +1,22 @@
+#include <GL/glew.h>
+#include <SDL3/SDL.h>
+
+#include <imgui.h>
+#include <imgui_impl_opengl3.h>
+#include <imgui_impl_sdl3.h>
+
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 #include <unordered_map>
 
 namespace archipelago {
+
+constexpr int kWindowWidth = 1280;
+constexpr int kWindowHeight = 720;
+constexpr double kSecondsPerSimulatedHour = 2.0;
 
 enum class Resource { Iron, Steel };
 
@@ -18,9 +30,7 @@ std::string ToString(Resource r) {
 
 class Warehouse {
 public:
-    void Deposit(Resource resource, int amount) {
-        stock_[resource] += amount;
-    }
+    void Deposit(Resource resource, int amount) { stock_[resource] += amount; }
 
     bool Withdraw(Resource resource, int amount) {
         int& current = stock_[resource];
@@ -46,7 +56,6 @@ public:
         warehouse.Deposit(Resource::Iron, rate_);
         totalProduced_ += rate_;
         std::cout << "[hour " << hour << "] Iron Mine produced " << rate_ << " Iron\n";
-        std::cout << "[hour " << hour << "] Warehouse received " << rate_ << " Iron\n";
     }
 
     int totalProduced() const { return totalProduced_; }
@@ -62,30 +71,37 @@ public:
         : consumeRate_(consumeRate), outputRatioPercent_(outputRatioPercent) {}
 
     void Tick(Warehouse& warehouse, int hour) {
-        if (!warehouse.Withdraw(Resource::Iron, consumeRate_)) return;
+        if (!warehouse.Withdraw(Resource::Iron, consumeRate_)) {
+            idle_ = true;
+            std::cout << "[hour " << hour << "] Steel Mill idle (not enough Iron)\n";
+            return;
+        }
+        idle_ = false;
         totalConsumed_ += consumeRate_;
         int produced = consumeRate_ * outputRatioPercent_ / 100;
         warehouse.Deposit(Resource::Steel, produced);
         totalProduced_ += produced;
-        std::cout << "[hour " << hour << "] Steel Mill consumed " << consumeRate_ << " Iron\n";
-        std::cout << "[hour " << hour << "] Steel Mill produced " << produced << " Steel\n";
+        std::cout << "[hour " << hour << "] Steel Mill consumed " << consumeRate_ << " Iron, produced "
+                   << produced << " Steel\n";
     }
 
     int totalConsumed() const { return totalConsumed_; }
     int totalProduced() const { return totalProduced_; }
+    bool isIdle() const { return idle_; }
 
 private:
     int consumeRate_;
     int outputRatioPercent_;
     int totalConsumed_ = 0;
     int totalProduced_ = 0;
+    bool idle_ = false;
 };
 
 class Port {
 public:
-    void Export(int amount, int hour) {
+    void Export(int amount) {
         totalExported_ += amount;
-        std::cout << "[hour " << hour << "] Port exported " << amount << " Steel\n";
+        std::cout << "Port exported " << amount << " Steel\n";
     }
 
     int totalExported() const { return totalExported_; }
@@ -94,53 +110,92 @@ private:
     int totalExported_ = 0;
 };
 
+struct Vec2 {
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
+// Player-piloted cargo ship: simple 2D kinematic model (thrust + drag + angular
+// inertia), not a physics engine — enough to feel like a boat without pulling
+// in Jolt before the gameplay actually needs collisions (see CLAUDE.md).
 class CargoShip {
 public:
-    explicit CargoShip(int capacity) : capacity_(capacity) {}
+    CargoShip(int capacity, Vec2 startPos) : capacity_(capacity), position_(startPos) {}
 
-    void Tick(Warehouse& warehouse, Port& port, int hour) {
-        switch (state_) {
-            case State::AtMill: {
-                int available = warehouse.Get(Resource::Steel);
-                int amount = std::min(available, capacity_);
-                if (amount <= 0) break;
+    void HandleInput(const bool* keys, float dt) {
+        constexpr float kThrust = 220.0f;
+        constexpr float kTurnRate = 2.5f;
+
+        if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP]) {
+            velocity_.x += std::cos(heading_) * kThrust * dt;
+            velocity_.y += std::sin(heading_) * kThrust * dt;
+        }
+        if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN]) {
+            velocity_.x -= std::cos(heading_) * kThrust * dt;
+            velocity_.y -= std::sin(heading_) * kThrust * dt;
+        }
+        if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT]) angularVelocity_ -= kTurnRate * dt;
+        if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT]) angularVelocity_ += kTurnRate * dt;
+    }
+
+    void Update(float dt, Warehouse& warehouse, Port& port, Vec2 millDock, Vec2 portDock) {
+        constexpr float kLinearDrag = 0.6f;
+        constexpr float kAngularDrag = 0.85f;
+        constexpr float kMaxSpeed = 160.0f;
+        constexpr float kDockRadius = 40.0f;
+
+        velocity_.x *= std::pow(1.0f - kLinearDrag, dt);
+        velocity_.y *= std::pow(1.0f - kLinearDrag, dt);
+        angularVelocity_ *= std::pow(1.0f - kAngularDrag, dt);
+
+        float speed = std::sqrt(velocity_.x * velocity_.x + velocity_.y * velocity_.y);
+        if (speed > kMaxSpeed) {
+            velocity_.x = velocity_.x / speed * kMaxSpeed;
+            velocity_.y = velocity_.y / speed * kMaxSpeed;
+        }
+
+        position_.x += velocity_.x * dt;
+        position_.y += velocity_.y * dt;
+        heading_ += angularVelocity_ * dt;
+
+        if (Distance(position_, millDock) <= kDockRadius && cargo_ < capacity_) {
+            int available = warehouse.Get(Resource::Steel);
+            int amount = std::min(available, capacity_ - cargo_);
+            if (amount > 0) {
                 warehouse.Withdraw(Resource::Steel, amount);
-                cargo_ = amount;
-                std::cout << "[hour " << hour << "] Cargo Ship loaded " << amount << " Steel\n";
-                state_ = State::ToPort;
-                break;
+                cargo_ += amount;
+                std::cout << "Cargo Ship loaded " << amount << " Steel\n";
             }
-            case State::ToPort:
-                state_ = State::AtPort;
-                break;
-            case State::AtPort: {
-                if (cargo_ > 0) {
-                    std::cout << "[hour " << hour << "] Cargo Ship unloaded " << cargo_ << " Steel\n";
-                    port.Export(cargo_, hour);
-                    cargo_ = 0;
-                }
-                state_ = State::ToMine;
-                break;
-            }
-            case State::ToMine:
-                state_ = State::AtMill;
-                break;
+        }
+        if (Distance(position_, portDock) <= kDockRadius && cargo_ > 0) {
+            port.Export(cargo_);
+            std::cout << "Cargo Ship unloaded " << cargo_ << " Steel\n";
+            cargo_ = 0;
         }
     }
 
+    static float Distance(Vec2 a, Vec2 b) {
+        float dx = a.x - b.x;
+        float dy = a.y - b.y;
+        return std::sqrt(dx * dx + dy * dy);
+    }
+
+    Vec2 position() const { return position_; }
+    float heading() const { return heading_; }
     int cargo() const { return cargo_; }
 
 private:
-    enum class State { AtMill, ToPort, AtPort, ToMine };
-    State state_ = State::AtMill;
     int capacity_;
+    Vec2 position_;
+    Vec2 velocity_;
+    float heading_ = 0.0f;
+    float angularVelocity_ = 0.0f;
     int cargo_ = 0;
 };
 
-// Invariant that must hold every tick: every unit of Steel ever produced is
-// accounted for either sitting in the warehouse, riding the ship, or already
-// exported through the port. If this ever breaks, resources were created or
-// destroyed somewhere — that's the one failure mode Phase 0 exists to catch.
+// Invariant that must hold every simulated hour: every unit of Steel ever
+// produced is accounted for either in the warehouse, riding the ship, or
+// already exported. Phase 0's one failure mode to catch, still true in Phase 1.
 bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const Warehouse& warehouse,
                            const CargoShip& ship, const Port& port, int hour) {
     int ironBalance = mine.totalProduced() - mill.totalConsumed() - warehouse.Get(Resource::Iron);
@@ -148,41 +203,262 @@ bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const War
 
     if (ironBalance != 0 || steelBalance != 0) {
         std::cerr << "[hour " << hour << "] BALANCE VIOLATION: ironBalance=" << ironBalance
-                  << " steelBalance=" << steelBalance << "\n";
+                   << " steelBalance=" << steelBalance << "\n";
         return false;
     }
     return true;
+}
+
+// --- Rendering (placeholder: flat-colored quads/triangle, throwaway per Fase 1) ---
+
+GLuint CompileShader(GLenum type, const char* source) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    GLint success = 0;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
+        std::cerr << "Shader compile error: " << log << "\n";
+    }
+    return shader;
+}
+
+GLuint CreateShaderProgram() {
+    static const char* kVertexSrc = R"(
+        #version 330 core
+        layout (location = 0) in vec2 aPos;
+        void main() {
+            gl_Position = vec4(aPos, 0.0, 1.0);
+        }
+    )";
+    static const char* kFragmentSrc = R"(
+        #version 330 core
+        uniform vec3 uColor;
+        out vec4 FragColor;
+        void main() {
+            FragColor = vec4(uColor, 1.0);
+        }
+    )";
+    GLuint vs = CompileShader(GL_VERTEX_SHADER, kVertexSrc);
+    GLuint fs = CompileShader(GL_FRAGMENT_SHADER, kFragmentSrc);
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vs);
+    glAttachShader(program, fs);
+    glLinkProgram(program);
+    GLint success = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        char log[512];
+        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
+        std::cerr << "Program link error: " << log << "\n";
+    }
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    return program;
+}
+
+Vec2 ToNdc(Vec2 worldPos) {
+    return {(worldPos.x / kWindowWidth) * 2.0f - 1.0f, 1.0f - (worldPos.y / kWindowHeight) * 2.0f};
+}
+
+void DrawQuad(GLuint vao, GLuint vbo, Vec2 center, float halfW, float halfH, float r, float g, float b,
+              GLint colorLoc) {
+    Vec2 c0 = ToNdc({center.x - halfW, center.y - halfH});
+    Vec2 c1 = ToNdc({center.x + halfW, center.y - halfH});
+    Vec2 c2 = ToNdc({center.x + halfW, center.y + halfH});
+    Vec2 c3 = ToNdc({center.x - halfW, center.y + halfH});
+    float vertices[8] = {c0.x, c0.y, c1.x, c1.y, c2.x, c2.y, c3.x, c3.y};
+
+    glUniform3f(colorLoc, r, g, b);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+}
+
+void DrawShipTriangle(GLuint vao, GLuint vbo, Vec2 center, float heading, float size, GLint colorLoc) {
+    Vec2 tip = {center.x + std::cos(heading) * size, center.y + std::sin(heading) * size};
+    Vec2 back1 = {center.x + std::cos(heading + 2.6f) * size * 0.6f,
+                  center.y + std::sin(heading + 2.6f) * size * 0.6f};
+    Vec2 back2 = {center.x + std::cos(heading - 2.6f) * size * 0.6f,
+                  center.y + std::sin(heading - 2.6f) * size * 0.6f};
+    Vec2 p0 = ToNdc(tip);
+    Vec2 p1 = ToNdc(back1);
+    Vec2 p2 = ToNdc(back2);
+    float vertices[6] = {p0.x, p0.y, p1.x, p1.y, p2.x, p2.y};
+
+    glUniform3f(colorLoc, 0.9f, 0.9f, 0.2f);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
 }
 
 }  // namespace archipelago
 
 int main(int argc, char** argv) {
     using namespace archipelago;
+    (void)argc;
+    (void)argv;
 
-    int simulatedHours = 48;
-    if (argc > 1) simulatedHours = std::atoi(argv[1]);
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
+        return EXIT_FAILURE;
+    }
+
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+
+    SDL_Window* window = SDL_CreateWindow("Archipelago - Fase 1", kWindowWidth, kWindowHeight, SDL_WINDOW_OPENGL);
+    if (!window) {
+        std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
+        return EXIT_FAILURE;
+    }
+
+    SDL_GLContext glContext = SDL_GL_CreateContext(window);
+    if (!glContext) {
+        std::cerr << "SDL_GL_CreateContext failed: " << SDL_GetError() << "\n";
+        return EXIT_FAILURE;
+    }
+    SDL_GL_SetSwapInterval(1);
+
+    glewExperimental = GL_TRUE;
+    GLenum glewStatus = glewInit();
+    if (glewStatus != GLEW_OK) {
+        std::cerr << "glewInit failed: " << glewGetErrorString(glewStatus) << "\n";
+        return EXIT_FAILURE;
+    }
+
+    glViewport(0, 0, kWindowWidth, kWindowHeight);
+    glClearColor(0.05f, 0.15f, 0.25f, 1.0f);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::GetIO().IniFilename = nullptr;
+    ImGui_ImplSDL3_InitForOpenGL(window, glContext);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+    GLuint shaderProgram = CreateShaderProgram();
+    GLint colorLoc = glGetUniformLocation(shaderProgram, "uColor");
+
+    GLuint vao = 0;
+    GLuint vbo = 0;
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 8, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(0);
 
     Warehouse warehouse;
     IronMine mine(/*rate=*/10);
     SteelMill mill(/*consumeRate=*/10, /*outputRatioPercent=*/50);
-    CargoShip ship(/*capacity=*/20);
     Port port;
 
-    for (int hour = 1; hour <= simulatedHours; ++hour) {
-        mine.Tick(warehouse, hour);
-        mill.Tick(warehouse, hour);
-        ship.Tick(warehouse, port, hour);
+    const Vec2 minePos{160, 360};
+    const Vec2 warehousePos{340, 360};
+    const Vec2 millPos{520, 360};
+    const Vec2 millDock{620, 360};
+    const Vec2 portPos{1100, 360};
+    const Vec2 portDock{1000, 360};
 
-        if (!CheckMaterialBalance(mine, mill, warehouse, ship, port, hour)) {
-            return EXIT_FAILURE;
+    CargoShip ship(/*capacity=*/20, /*startPos=*/millDock);
+
+    Uint64 lastCounter = SDL_GetPerformanceCounter();
+    const double frequency = static_cast<double>(SDL_GetPerformanceFrequency());
+    double hourAccumulator = 0.0;
+    int hour = 0;
+    bool running = true;
+
+    while (running) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            ImGui_ImplSDL3_ProcessEvent(&event);
+            if (event.type == SDL_EVENT_QUIT) running = false;
         }
+
+        Uint64 nowCounter = SDL_GetPerformanceCounter();
+        double dt = static_cast<double>(nowCounter - lastCounter) / frequency;
+        lastCounter = nowCounter;
+        if (dt > 0.25) dt = 0.25;  // clamp: avoid spiral-of-death after a stall/breakpoint
+
+        const bool* keys = SDL_GetKeyboardState(nullptr);
+        if (keys[SDL_SCANCODE_ESCAPE]) running = false;
+
+        ship.HandleInput(keys, static_cast<float>(dt));
+        ship.Update(static_cast<float>(dt), warehouse, port, millDock, portDock);
+
+        hourAccumulator += dt;
+        while (hourAccumulator >= kSecondsPerSimulatedHour) {
+            hourAccumulator -= kSecondsPerSimulatedHour;
+            ++hour;
+            mine.Tick(warehouse, hour);
+            mill.Tick(warehouse, hour);
+            if (!CheckMaterialBalance(mine, mill, warehouse, ship, port, hour)) {
+                running = false;
+            }
+        }
+
+        glClear(GL_COLOR_BUFFER_BIT);
+        glUseProgram(shaderProgram);
+
+        DrawQuad(vao, vbo, minePos, 60, 40, 0.55f, 0.35f, 0.15f, colorLoc);
+        DrawQuad(vao, vbo, warehousePos, 50, 40, 0.85f, 0.75f, 0.2f, colorLoc);
+        DrawQuad(vao, vbo, millPos, 60, 40, 0.5f, 0.5f, 0.55f, colorLoc);
+        DrawQuad(vao, vbo, portPos, 60, 40, 0.2f, 0.4f, 0.8f, colorLoc);
+        DrawShipTriangle(vao, vbo, ship.position(), ship.heading(), 24.0f, colorLoc);
+
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        ImDrawList* labels = ImGui::GetForegroundDrawList();
+        const ImU32 labelColor = IM_COL32(255, 255, 255, 255);
+        labels->AddText(ImVec2(minePos.x - 55, minePos.y - 60), labelColor, "Mina de Hierro");
+        labels->AddText(ImVec2(warehousePos.x - 40, warehousePos.y - 60), labelColor, "Almacen");
+        labels->AddText(ImVec2(millPos.x - 30, millPos.y - 60), labelColor, "Aceria");
+        labels->AddText(ImVec2(portPos.x - 25, portPos.y - 60), labelColor, "Puerto");
+
+        ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Estado de la simulacion");
+        ImGui::Text("Hora simulada: %d", hour);
+        ImGui::Separator();
+        ImGui::Text("Almacen - Hierro: %d", warehouse.Get(Resource::Iron));
+        ImGui::Text("Almacen - Acero:  %d", warehouse.Get(Resource::Steel));
+        ImGui::Text("Aceria: %s", mill.isIdle() ? "PARADA (sin Hierro)" : "activa");
+        ImGui::Separator();
+        ImGui::Text("Barco - carga: %d", ship.cargo());
+        ImGui::Text("Puerto - exportado total: %d", port.totalExported());
+        ImGui::Separator();
+        ImGui::Text("Hierro producido total: %d", mine.totalProduced());
+        ImGui::Text("Acero producido total:  %d", mill.totalProduced());
+        ImGui::End();
+
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        SDL_GL_SwapWindow(window);
     }
 
-    std::cout << "\n=== Simulation finished: " << simulatedHours << " hours ===\n";
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+
+    std::cout << "\n=== Fase 1 finished ===\n";
     std::cout << "Total Iron produced: " << mine.totalProduced() << "\n";
     std::cout << "Total Steel produced: " << mill.totalProduced() << "\n";
     std::cout << "Total Steel exported: " << port.totalExported() << "\n";
-    std::cout << "Material balance: OK (no resources created or destroyed)\n";
+
+    glDeleteBuffers(1, &vbo);
+    glDeleteVertexArrays(1, &vao);
+    glDeleteProgram(shaderProgram);
+    SDL_GL_DestroyContext(glContext);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
 
     return EXIT_SUCCESS;
 }

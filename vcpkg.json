@@ -1,0 +1,13 @@
+{
+  "name": "archipelago",
+  "version": "0.1.0",
+  "dependencies": [
+    "sdl3",
+    "glew",
+    {
+      "name": "imgui",
+      "features": ["sdl3-binding", "opengl3-binding"]
+    }
+  ],
+  "builtin-baseline": "6d811e820d5dd72ce2cc8a35596a33e67572d83d"
+}

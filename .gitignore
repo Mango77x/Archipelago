@@ -2,3 +2,8 @@ build/
 *.obj
 *.pdb
 *.ilk
+vcpkg_installed/
+CMakeFiles/
+CMakeCache.txt
+out/
+vault/.obsidian/
