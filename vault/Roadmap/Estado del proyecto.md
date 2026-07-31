@@ -4,15 +4,15 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 1 - Primer prototipo jugable|Fase 1]] — en curso.**
+**Fase actual: [[Fase 2 - Economía|Fase 2]] — sin empezar.**
 
 ## Fase 0 — cerrada
 
 [[Fase 0 - Prototipo de simulación]] se completó y se verificó con el usuario: simulación de consola en C++ puro (mina → almacén → acería → almacén → barco → puerto), 48 horas simuladas sin violaciones de balance de materiales. Committeado en git (`main`, repo en GitHub).
 
-## Fase 1 — progreso hasta ahora
+## Fase 1 — cerrada
 
-Ya funciona y está verificado visualmente por el usuario:
+Definition of Done confirmada por el usuario ("un jugador nuevo entiende la cadena de producción, la interrumpe, la restaura y observa causa-efecto con claridad, sin leer documentación"). Lo construido:
 
 - Build system: CMake + vcpkg en modo manifiesto (`vcpkg.json`, `CMakeLists.txt`), usando el CMake y vcpkg que vienen empaquetados con las Visual Studio Build Tools (no hizo falta instalar nada aparte).
 - Dependencias: SDL3, GLEW (loader de OpenGL real, no SDL_Renderer — decisión explícita del usuario), Dear ImGui (con bindings SDL3 + OpenGL3).
@@ -20,12 +20,13 @@ Ya funciona y está verificado visualmente por el usuario:
 - Barco de carga jugable con modelo cinemático simple (empuje + arrastre + inercia de giro vía WASD/flechas) — no motor de física, ver [[Vehículos como interfaz]].
 - Carga/descarga automática por proximidad a los muelles (mismo comportamiento de balance de materiales que Fase 0, ahora con movimiento manual).
 - Panel de estado con Dear ImGui: hora simulada, stock de hierro/acero, estado de la acería (activa/parada), carga del barco, total exportado — resuelve el principio "todo evento importante tiene una causa entendible" (ver [[Principios - Experiencia del jugador]]).
+- **Checkpoint de Guardado/Carga**: F5 guarda, F9 carga, formato de texto plano inspeccionable a mano (`archipelago_save.txt`, no versionado en git). Guarda hora simulada, acumulador de hora, totales de mina/acería/puerto, stock del almacén y estado completo del barco (posición, velocidad, rumbo, carga). Probado y confirmado por el usuario: el estado vuelve exactamente a donde se guardó.
 
-## Pendiente para cerrar Fase 1
+Committeado y pusheado en git (`main`, repo en GitHub).
 
-- **Checkpoint de Guardado/Carga** (última tarea de Fase 1, ver la propia nota de [[Fase 1 - Primer prototipo jugable]]) — todavía no implementado.
-- Confirmar con el usuario que el Definition of Done completo se cumple antes de dar la fase por cerrada (ver [[Convenciones de trabajo con Claude Code]]).
-- Commit de todo el trabajo de Fase 1 (CMake, vcpkg, main.cpp reescrito, este vault) — todavía no committeado a git en el momento de escribir esta nota.
+## Siguiente paso
+
+[[Fase 2 - Economía]] — precios, compra, venta, beneficio, gastos. Todavía sin empezar; falta desglosar el primer paso concreto cuando el usuario quiera arrancarla.
 
 ## Decisiones de diseño añadidas durante Fase 1 (vigentes para cuando toque implementarlas)
 

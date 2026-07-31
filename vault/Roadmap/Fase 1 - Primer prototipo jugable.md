@@ -2,7 +2,7 @@
 tags: [roadmap, fase]
 ---
 
-# Fase 1 — Primer prototipo jugable (EN CURSO)
+# Fase 1 — Primer prototipo jugable (CERRADA)
 
 **Objetivo**: primera versión interactiva. No busca ser divertida — busca que un jugador nuevo entienda la cadena logística de inmediato.
 
@@ -12,7 +12,7 @@ tags: [roadmap, fase]
 
 **Definition of Done**: un jugador nuevo puede entender la cadena de producción, interrumpirla, restaurarla y observar causa-efecto con claridad, sin leer documentación.
 
-**Checkpoint añadido — Guardado/Carga**: al cerrar la Fase 1, añadir serialización simple del estado del mundo (guardar/cargar). Es barato en este punto (poco estado) y da una herramienta de debugging inmediata (poder guardar el estado exacto donde algo se rompió). No es una fase aparte, es la última tarea de la Fase 1. **Todavía no implementado** — ver [[Estado del proyecto]].
+**Checkpoint añadido — Guardado/Carga**: al cerrar la Fase 1, añadir serialización simple del estado del mundo (guardar/cargar). Es barato en este punto (poco estado) y da una herramienta de debugging inmediata (poder guardar el estado exacto donde algo se rompió). No es una fase aparte, es la última tarea de la Fase 1. **Implementado y confirmado por el usuario** (F5/F9, formato de texto plano) — ver [[Estado del proyecto]].
 
 Progreso detallado y pendientes: [[Estado del proyecto]].
 

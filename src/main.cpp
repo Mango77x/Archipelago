@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 
@@ -44,6 +46,8 @@ public:
         return it == stock_.end() ? 0 : it->second;
     }
 
+    void SetStock(Resource resource, int amount) { stock_[resource] = amount; }
+
 private:
     std::unordered_map<Resource, int> stock_;
 };
@@ -59,6 +63,7 @@ public:
     }
 
     int totalProduced() const { return totalProduced_; }
+    void SetTotalProduced(int value) { totalProduced_ = value; }
 
 private:
     int rate_;
@@ -88,6 +93,11 @@ public:
     int totalConsumed() const { return totalConsumed_; }
     int totalProduced() const { return totalProduced_; }
     bool isIdle() const { return idle_; }
+    void SetTotals(int consumed, int produced, bool idle) {
+        totalConsumed_ = consumed;
+        totalProduced_ = produced;
+        idle_ = idle;
+    }
 
 private:
     int consumeRate_;
@@ -105,6 +115,7 @@ public:
     }
 
     int totalExported() const { return totalExported_; }
+    void SetTotalExported(int value) { totalExported_ = value; }
 
 private:
     int totalExported_ = 0;
@@ -181,8 +192,18 @@ public:
     }
 
     Vec2 position() const { return position_; }
+    Vec2 velocity() const { return velocity_; }
     float heading() const { return heading_; }
+    float angularVelocity() const { return angularVelocity_; }
     int cargo() const { return cargo_; }
+
+    void SetState(Vec2 position, Vec2 velocity, float heading, float angularVelocity, int cargo) {
+        position_ = position;
+        velocity_ = velocity;
+        heading_ = heading;
+        angularVelocity_ = angularVelocity;
+        cargo_ = cargo;
+    }
 
 private:
     int capacity_;
@@ -206,6 +227,77 @@ bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const War
                    << " steelBalance=" << steelBalance << "\n";
         return false;
     }
+    return true;
+}
+
+// --- Save/Load: plain-text state dump. Debugging tool first, save format
+// second — a human can open this file and see exactly what broke. ---
+
+constexpr const char* kSaveFile = "archipelago_save.txt";
+constexpr const char* kSaveHeader = "ARCHIPELAGO_SAVE_V1";
+
+void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const SteelMill& mill,
+              const Warehouse& warehouse, const CargoShip& ship, const Port& port) {
+    std::ofstream out(kSaveFile);
+    if (!out) {
+        std::cerr << "SaveGame: could not open " << kSaveFile << " for writing\n";
+        return;
+    }
+    Vec2 pos = ship.position();
+    Vec2 vel = ship.velocity();
+    out << kSaveHeader << "\n";
+    out << hour << " " << hourAccumulator << "\n";
+    out << mine.totalProduced() << "\n";
+    out << mill.totalConsumed() << " " << mill.totalProduced() << " " << (mill.isIdle() ? 1 : 0) << "\n";
+    out << warehouse.Get(Resource::Iron) << " " << warehouse.Get(Resource::Steel) << "\n";
+    out << port.totalExported() << "\n";
+    out << pos.x << " " << pos.y << " " << vel.x << " " << vel.y << " " << ship.heading() << " "
+        << ship.angularVelocity() << " " << ship.cargo() << "\n";
+    std::cout << "Game saved to " << kSaveFile << " (hour " << hour << ")\n";
+}
+
+bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mill, Warehouse& warehouse,
+              CargoShip& ship, Port& port) {
+    std::ifstream in(kSaveFile);
+    if (!in) {
+        std::cerr << "LoadGame: could not open " << kSaveFile << "\n";
+        return false;
+    }
+    std::string header;
+    std::getline(in, header);
+    if (header != kSaveHeader) {
+        std::cerr << "LoadGame: unrecognized save file header\n";
+        return false;
+    }
+
+    int mineProduced = 0;
+    int millConsumed = 0, millProduced = 0, millIdleFlag = 0;
+    int ironStock = 0, steelStock = 0;
+    int exported = 0;
+    Vec2 pos{}, vel{};
+    float heading = 0.0f, angularVelocity = 0.0f;
+    int cargo = 0;
+
+    in >> hour >> hourAccumulator;
+    in >> mineProduced;
+    in >> millConsumed >> millProduced >> millIdleFlag;
+    in >> ironStock >> steelStock;
+    in >> exported;
+    in >> pos.x >> pos.y >> vel.x >> vel.y >> heading >> angularVelocity >> cargo;
+
+    if (!in) {
+        std::cerr << "LoadGame: save file is truncated or malformed\n";
+        return false;
+    }
+
+    mine.SetTotalProduced(mineProduced);
+    mill.SetTotals(millConsumed, millProduced, millIdleFlag != 0);
+    warehouse.SetStock(Resource::Iron, ironStock);
+    warehouse.SetStock(Resource::Steel, steelStock);
+    port.SetTotalExported(exported);
+    ship.SetState(pos, vel, heading, angularVelocity, cargo);
+
+    std::cout << "Game loaded from " << kSaveFile << " (hour " << hour << ")\n";
     return true;
 }
 
@@ -373,6 +465,9 @@ int main(int argc, char** argv) {
     double hourAccumulator = 0.0;
     int hour = 0;
     bool running = true;
+    bool f5WasDown = false;
+    bool f9WasDown = false;
+    std::string lastSaveLoadMessage;
 
     while (running) {
         SDL_Event event;
@@ -388,6 +483,23 @@ int main(int argc, char** argv) {
 
         const bool* keys = SDL_GetKeyboardState(nullptr);
         if (keys[SDL_SCANCODE_ESCAPE]) running = false;
+
+        bool f5IsDown = keys[SDL_SCANCODE_F5];
+        if (f5IsDown && !f5WasDown) {
+            SaveGame(hour, hourAccumulator, mine, mill, warehouse, ship, port);
+            lastSaveLoadMessage = "Guardado (hora " + std::to_string(hour) + ")";
+        }
+        f5WasDown = f5IsDown;
+
+        bool f9IsDown = keys[SDL_SCANCODE_F9];
+        if (f9IsDown && !f9WasDown) {
+            if (LoadGame(hour, hourAccumulator, mine, mill, warehouse, ship, port)) {
+                lastSaveLoadMessage = "Cargado (hora " + std::to_string(hour) + ")";
+            } else {
+                lastSaveLoadMessage = "Error al cargar (ver consola)";
+            }
+        }
+        f9WasDown = f9IsDown;
 
         ship.HandleInput(keys, static_cast<float>(dt));
         ship.Update(static_cast<float>(dt), warehouse, port, millDock, portDock);
@@ -436,6 +548,11 @@ int main(int argc, char** argv) {
         ImGui::Separator();
         ImGui::Text("Hierro producido total: %d", mine.totalProduced());
         ImGui::Text("Acero producido total:  %d", mill.totalProduced());
+        ImGui::Separator();
+        ImGui::Text("F5: guardar   F9: cargar");
+        if (!lastSaveLoadMessage.empty()) {
+            ImGui::Text("%s", lastSaveLoadMessage.c_str());
+        }
         ImGui::End();
 
         ImGui::Render();
