@@ -2,11 +2,11 @@
 tags: [roadmap, fase]
 ---
 
-# Fase 5 — Primera empresa de IA
+# Fase 5 — Primera empresa de IA (CERRADA)
 
 Introduce competencia: una empresa autónoma que usa exactamente las mismas mecánicas que el jugador, sin trampas ni bonos ocultos (ver [[Principios - IA]]).
 
-**Definition of Done**: la IA gana dinero, se expande y sobrevive una hora de simulación.
+**Definition of Done**: la IA gana dinero, se expande y sobrevive una hora de simulación. **Confirmada por el usuario, cubierta por [[Fase 5.1 - Competidor con capital propio|Fase 5.1]]. Fase dada por completa — no se abren más sub-fases por ahora.**
 
 > **Nota de alcance**: esta fase, tal como está descrita, es en realidad un proyecto de IA en sí mismo (expansión, gestión de flota, competencia por rutas). Se desglosó en sub-fases al llegar aquí, como pedía esta misma nota.
 

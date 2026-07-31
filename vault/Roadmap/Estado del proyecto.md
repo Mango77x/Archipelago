@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 5 - Primera empresa de IA|Fase 5]] — sub-fase 5.1 cerrada, resto por definir.**
+**Fase actual: [[Fase 6 - Gobiernos|Fase 6]] — sin empezar.**
 
 ## Fase 0 — cerrada
 
@@ -40,13 +40,13 @@ Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 4 -
 
 Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 4.5 - Migración a 3D]]. Resumen: renderizado 3D real (perspectiva, profundidad, cajas/casco simple), cámara conmutable primera/tercera persona (tecla C), iluminación direccional simple (añadida dentro de esta fase, ajuste de alcance a petición del usuario), y migración de todas las posiciones del mundo a `glm::vec3`. Economía, rutas, guardado/carga y replay de Fase 4 siguen funcionando igual por debajo.
 
-## Fase 5.1 — cerrada
+## Fase 5 — cerrada
 
-Definition of Done (heredado de Fase 5) confirmado por el usuario: "va mejorando su flota y ganando dinero". Ver detalle completo en [[Fase 5.1 - Competidor con capital propio]]. Resumen: empresa rival de IA con caja propia ($2000, mismas reglas que el jugador), compite por el mismo Hierro/Acero/Mercado (sin cadena de producción paralela), regla de expansión simple basada en caja disponible, flota autopilotada distinguible por color, panel propio, guardado/carga extendido.
+Definition of Done confirmado por el usuario: "va mejorando su flota y ganando dinero". Cubierta por [[Fase 5.1 - Competidor con capital propio]] — empresa rival de IA con caja propia ($2000, mismas reglas que el jugador), compite por el mismo Hierro/Acero/Mercado (sin cadena de producción paralela), regla de expansión simple basada en caja disponible, flota autopilotada distinguible por color, panel propio, guardado/carga extendido. El usuario decidió no abrir más sub-fases de IA por ahora.
 
 ## Siguiente paso
 
-El DoD original de Fase 5 ya está cubierto por 5.1. Pendiente de decidir con el usuario: ¿se considera Fase 5 completa así, o se añaden más sub-fases (decisiones de IA más sensibles al mercado, múltiples competidores, uso del Replay para depurar decisiones) antes de pasar a [[Fase 6 - Gobiernos]]?
+[[Fase 6 - Gobiernos]] — impuestos, infraestructura, puertos públicos, inversiones, regulaciones. Todavía sin desglosar en un primer paso concreto.
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 
