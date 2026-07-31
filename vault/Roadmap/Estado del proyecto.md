@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 4 - Logística multi-isla|Fase 4]] — en curso, pendiente de confirmación de cierre.**
+**Fase actual: [[Fase 5 - Primera empresa de IA|Fase 5]] — sin empezar.**
 
 ## Fase 0 — cerrada
 
@@ -32,14 +32,13 @@ Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 2 -
 
 Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 3 - Automatización]]. Resumen: flota de barcos (el del jugador pilotable a mano, el resto autopilotado con el mismo modelo cinemático), compra de barcos ($500, con la simplificación anotada en [[Vehículos como producto económico]]), mantenimiento por barco, guardado/carga de toda la flota.
 
-## Fase 4 — progreso hasta ahora
+## Fase 4 — cerrada
 
-Ver detalle completo en [[Fase 4 - Logística multi-isla]]. Resumen: 3 islas con la cadena repartida (Mina/Acería/Puerto) a distancia real, cámara siguiendo al jugador, flota con rutas (jugador libre, bots restringidos a su ruta), anillos visuales de muelle, autopiloto con frenado, reequilibrio del reloj económico (varias vueltas de ajuste tras pruebas del usuario: barco atascado, violación de balance, bancarrota por reloj mal calibrado), y el checkpoint de Sistema de Replay (F6/F7, paso de simulación fijo) ya implementado.
+Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 4 - Logística multi-isla]]. Resumen: 3 islas con la cadena repartida (Mina/Acería/Puerto) a distancia real, cámara siguiendo al jugador, flota con rutas (jugador libre, bots restringidos a su ruta), anillos visuales de muelle, autopiloto con frenado, reequilibrio del reloj económico (varias vueltas de ajuste tras pruebas del usuario: barco atascado, violación de balance, bancarrota por reloj mal calibrado), y el checkpoint de Sistema de Replay (F6/F7, paso de simulación fijo).
 
-## Pendiente
+## Siguiente paso
 
-- Confirmar con el usuario que el DoD de Fase 4 se considera cumplido antes de darla por cerrada.
-- Commit + push de todo lo anterior.
+[[Fase 5 - Primera empresa de IA]] — una empresa autónoma que usa exactamente las mismas mecánicas que el jugador. El propio roadmap avisa de que esta fase, tal como está descrita, es en realidad un proyecto de IA en sí mismo — cuando se empiece, hay que desglosarla en sub-fases con su propio Definition of Done antes de tocar código, igual que se hizo con este roadmap completo.
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 

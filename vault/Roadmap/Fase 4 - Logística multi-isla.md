@@ -2,11 +2,11 @@
 tags: [roadmap, fase]
 ---
 
-# Fase 4 — Logística multi-isla (EN CURSO)
+# Fase 4 — Logística multi-isla (CERRADA)
 
 Introduce decisiones logísticas reales: múltiples islas, industrias, recursos, cadenas de producción y distancias de transporte distintas.
 
-**Definition of Done**: tres islas intercambian recursos de forma autónoma y el jugador debe optimizar rutas.
+**Definition of Done**: tres islas intercambian recursos de forma autónoma y el jugador debe optimizar rutas. **Confirmada por el usuario.**
 
 ## Implementado
 
