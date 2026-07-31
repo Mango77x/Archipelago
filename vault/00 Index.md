@@ -70,6 +70,7 @@ Este vault tiene dos partes que no deben confundirse:
 - [[Fase 7.1 - Oleaje y boyantez]]
 - [[Fase 7.2 - Tormentas]]
 - [[Fase 7 - Entorno]]
+- [[Fase 8.0 - Terreno procedural]]
 - [[Fase 8 - Mundo procedural]]
 - [[Fase 9 - Seguridad]]
 - [[Fase 10 - Guerra]]

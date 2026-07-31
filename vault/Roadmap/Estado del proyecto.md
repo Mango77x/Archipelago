@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 8 - Mundo procedural|Fase 8]] — en curso, empezando por generación de terreno.** (Resto de [[Fase 7 - Entorno|Fase 7]] — pesca, estaciones, demanda energética — aplazado a petición del usuario hasta que haya mundo/economía real donde engancharlo. [[Fase 6 - Gobiernos|Fase 6]] también aplazada.)
+**Fase actual: [[Fase 8.0 - Terreno procedural|Fase 8.0]] — en curso** (ver detalle y los 6 pasos en esa nota). (Resto de [[Fase 7 - Entorno|Fase 7]] — pesca, estaciones, demanda energética — aplazado a petición del usuario hasta que haya mundo/economía real donde engancharlo. [[Fase 6 - Gobiernos|Fase 6]] también aplazada.)
 
 ## Fase 0 — cerrada
 

@@ -4,7 +4,7 @@ tags: [roadmap, fase]
 
 # Fase 8 — Mundo procedural
 
-Generación completa de archipiélagos, múltiples condiciones iniciales, rejugabilidad.
+Generación completa de archipiélagos, múltiples condiciones iniciales, rejugabilidad. Primer paso concreto: [[Fase 8.0 - Terreno procedural]] (en curso).
 
 **Definition of Done**: mundos generados distintos producen economías notablemente distintas.
 
