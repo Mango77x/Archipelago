@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 7.2 - Tormentas|Fase 7.2]] cerrada — siguiente es el resto de [[Fase 7 - Entorno|Fase 7]] (pesca, estaciones, demanda energética) o [[Fase 8 - Mundo procedural]].** ([[Fase 6 - Gobiernos|Fase 6]] aplazada.)
+**Fase actual: [[Fase 8 - Mundo procedural|Fase 8]] — en curso, empezando por generación de terreno.** (Resto de [[Fase 7 - Entorno|Fase 7]] — pesca, estaciones, demanda energética — aplazado a petición del usuario hasta que haya mundo/economía real donde engancharlo. [[Fase 6 - Gobiernos|Fase 6]] también aplazada.)
 
 ## Fase 0 — cerrada
 
@@ -64,9 +64,13 @@ Dos ajustes más tras seguir jugando: (1) margen económico — el usuario iba "
 
 Definition of Done confirmada por el usuario jugando en directo. Ver detalle completo en [[Fase 7.2 - Tormentas]]. Resumen: viento como campo continuo (no interruptor calma/tormenta) — un ambiente permanente (10-35%, nunca 0% real) más células de tormenta que nacen, se desplazan en línea recta y se disipan del todo (deterministas, derivadas por hash del ciclo, no RNG en tiempo real), escalando la amplitud del oleaje ya existente hasta 2x en tormenta plena. De paso se corrigió un bug de render heredado de antes de tener boyantez real (el casco se dibujaba 8 unidades más alto de donde la física lo tenía, por eso el vaivén no coincidía con la ola visible). El usuario aceptó el resultado como "decente" sin más ajuste por ahora (el comportamiento algo errático de barcos IA en tormenta plena queda anotado, no bloqueante).
 
+## Fase 7 — resto aplazado
+
+Pesca, estaciones y demanda energética quedan aplazadas a petición explícita del usuario ("eso sobra hasta que no haya algo tangible") — se retoman cuando [[Fase 8 - Mundo procedural]] dé más mundo/economía real donde engancharlos.
+
 ## Siguiente paso
 
-Resto de [[Fase 7 - Entorno]] (pesca, estaciones, demanda energética) o [[Fase 8 - Mundo procedural]] — a decidir con el usuario.
+[[Fase 8 - Mundo procedural]] — en curso, empezando por generación de terreno (a definir con el usuario antes de implementar).
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 
