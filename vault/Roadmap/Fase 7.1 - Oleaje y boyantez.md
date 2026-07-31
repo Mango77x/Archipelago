@@ -2,7 +2,7 @@
 tags: [roadmap, fase]
 ---
 
-# Fase 7.1 — Oleaje y boyantez (EN CURSO)
+# Fase 7.1 — Oleaje y boyantez (CERRADA)
 
 Construye directamente sobre [[Fase 7.0 - Motor de física real (Jolt)]]: ahí se migró `CargoShip` a un rigid body real pero restringido a X/Z + guiñada, sobre agua todavía plana, precisamente para aislar "¿el manejo por física se siente bien?" de "¿el oleaje funciona?". Esta fase resuelve la segunda mitad — es el motivo original por el que el usuario pidió física real ("mis juegos dependen siempre de física buena y real... como Sea of Thieves o Stormworks... el juego para el usuario es usar vehículos y los vehículos tienen que convivir con el entorno").
 
@@ -20,5 +20,11 @@ Construye directamente sobre [[Fase 7.0 - Motor de física real (Jolt)]]: ahí s
 - Pesca, estaciones, demanda energética.
 
 **Definition of Done**: el barco boya y cabecea/balancea de forma creíble sobre un mar que visualmente ondula igual que la física que se siente (mismo campo de olas en muestreo y render), sin romper atraque, carga/descarga, guardado/carga, replay ni la IA — confirmado por el usuario jugando en directo, igual que en 7.0.
+
+**Confirmado por el usuario jugando en directo.** Ajustes hechos durante la validación (los mismos "en ajuste por sensación" que en Fase 7.0):
+- Boyantez inicial (rigidez 3000, sin amortiguación) hacía que el barco saliera disparado fuera del agua y rebotara sin parar — un muelle sin amortiguador es un oscilador no amortiguado. Se añadió un término de amortiguación (`kBuoyancyDamping`, cerca del crítico) que se opone a la velocidad vertical real de cada esquina (via `GetPointVelocity`, para que cabeceo/balanceo también contribuyan), y se bajó la rigidez (2000) para que el barco cale hasta una línea de flotación creíble en vez de ir "planeando" por encima del agua.
+- Los barcos se posicionan ligeramente por encima del nivel nominal del agua al crearse (`kInitialDraftOffset`), para no arrancar con un "chapoteo" inicial mientras la boyantez aún no tiene nada que empujar.
+- Se añadió un fondo marino plano (cuerpo estático de colisión + visual, sin deformación) a petición del usuario — "para ciertas embarcaciones o futuros submarinos". Sin forma de terreno todavía; eso espera a mundo procedural (Fase 8).
+- La cámara ya solo usaba el rumbo (yaw) del barco, no la rotación completa, así que quedó desacoplada del balanceo/cabeceo sin tocar código — confirmado que no marea.
 
 Anterior: [[Fase 7.0 - Motor de física real (Jolt)]]. Siguiente: resto de [[Fase 7 - Entorno]] (tormentas, pesca, estaciones, demanda energética), luego [[Fase 8 - Mundo procedural]].

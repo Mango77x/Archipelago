@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 7.1 - Oleaje y boyantez|Fase 7.1]] — en curso (definida, sin implementar todavía).** ([[Fase 6 - Gobiernos|Fase 6]] aplazada; el resto de [[Fase 7 - Entorno|Fase 7]] pausado hasta tener la física real construida — a petición del usuario.)
+**Fase actual: [[Fase 7.1 - Oleaje y boyantez|Fase 7.1]] cerrada — siguiente es el resto de [[Fase 7 - Entorno|Fase 7]] o retomar economía.** ([[Fase 6 - Gobiernos|Fase 6]] aplazada.)
 
 ## Fase 0 — cerrada
 
@@ -52,9 +52,15 @@ Definition of Done confirmado por el usuario: "va mejorando su flota y ganando d
 
 Definition of Done confirmada por el usuario jugando en directo. Ver detalle completo en [[Fase 7.0 - Motor de física real (Jolt)]]. Resumen: `CargoShip` migrado de modelo cinemático a mano a un rigid body real de Jolt (empuje/giro como fuerzas y pares reales), con varias vueltas de ajuste por sensación tras pruebas del usuario (velocidad de crucero, par de giro, distancia de frenado, signo de giro invertido en controles del jugador y en el `AutoPilot` de los bots). Agua todavía plana — sin oleaje ni boyantez.
 
+## Fase 7.1 — cerrada
+
+Definition of Done confirmada por el usuario jugando en directo. Ver detalle completo en [[Fase 7.1 - Oleaje y boyantez]]. Resumen: campo de olas Gerstner (3 olas superpuestas) compartido entre muestreo físico (C++) y render (GLSL), malla de agua real desplazada por vértice sustituyendo el plano plano anterior, boyantez muestreada en las 4 esquinas del casco (cabeceo/balanceo salen de fuerzas reales, no simulados a mano), grados de libertad del barco relajados a los 6 completos con gravedad real, y un fondo marino plano (sin terreno todavía) a petición del usuario. Cámara confirmada que no marea (ya usaba solo el rumbo, no la rotación completa).
+
+Además, en respuesta a que el usuario abriera `main.cpp` y viera 1873 líneas mezclando economía/física/render/guardado en un único archivo: reorganización completa en módulos por sistema (`common`, `waves`, `economy`, `jolt_world`, `ship`, `simulation`, `save_load`, `replay`, `render`, más un `main.cpp` que ya solo contiene el punto de entrada y el bucle principal). Refactor puro, mismo comportamiento verificado.
+
 ## Siguiente paso
 
-[[Fase 7.1 - Oleaje y boyantez]] — definida, pendiente de implementar: campo de olas Gerstner (2-3 olas superpuestas) compartido entre muestreo físico y render, malla de agua real desplazada por vértice, boyantez muestreada en 4+ puntos del casco (cabeceo/balanceo reales), y relajar los grados de libertad del barco a los 6 completos. Solo después se retoma el resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones, demanda energética).
+Resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones, demanda energética) o retomar el balance económico pendiente (ver más abajo) — a decidir con el usuario. Después vendría [[Fase 8 - Mundo procedural]].
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 
