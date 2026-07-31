@@ -394,7 +394,8 @@ void DrawDockRing(GLuint ringVao, GLuint ringVbo, GLint mvpLoc, GLint colorLoc, 
 }
 
 void GenerateTerrainMesh(float centerX, float centerZ, float halfExtentX, float halfExtentZ, int segments,
-                          uint32_t seed, std::vector<float>& outVertices, std::vector<GLuint>& outIndices) {
+                          uint32_t seed, float offsetX, float offsetZ, std::vector<float>& outVertices,
+                          std::vector<GLuint>& outIndices) {
     int verticesPerSide = segments + 1;
     float minX = centerX - halfExtentX;
     float minZ = centerZ - halfExtentZ;
@@ -407,12 +408,18 @@ void GenerateTerrainMesh(float centerX, float centerZ, float halfExtentX, float 
     for (int row = 0; row < verticesPerSide; ++row) {
         float z = minZ + stepZ * static_cast<float>(row);
         for (int col = 0; col < verticesPerSide; ++col) {
+            // World-space vertex position stays on the regular grid;
+            // only the noise lookup itself is shifted (nx,nz), same as
+            // CreateSeaFloorHeightFieldBody, so the biggest island renders
+            // centered without moving the mesh's actual grid.
             float x = minX + stepX * static_cast<float>(col);
-            float h = Terrain::SeaFloorHeight(x, z, seed);
-            float hx1 = Terrain::SeaFloorHeight(x + eps, z, seed);
-            float hx0 = Terrain::SeaFloorHeight(x - eps, z, seed);
-            float hz1 = Terrain::SeaFloorHeight(x, z + eps, seed);
-            float hz0 = Terrain::SeaFloorHeight(x, z - eps, seed);
+            float nx = x - offsetX;
+            float nz = z - offsetZ;
+            float h = Terrain::Height(nx, nz, seed);
+            float hx1 = Terrain::Height(nx + eps, nz, seed);
+            float hx0 = Terrain::Height(nx - eps, nz, seed);
+            float hz1 = Terrain::Height(nx, nz + eps, seed);
+            float hz0 = Terrain::Height(nx, nz - eps, seed);
             float dhdx = (hx1 - hx0) / (2.0f * eps);
             float dhdz = (hz1 - hz0) / (2.0f * eps);
             glm::vec3 normal = glm::normalize(glm::vec3(-dhdx, 1.0f, -dhdz));
@@ -473,6 +480,26 @@ glm::mat4 ComputeViewProj(CameraMode mode, Vec3 shipPos, float heading, float as
 
     glm::mat4 view = glm::lookAt(eye, target, up);
     glm::mat4 projection = glm::perspective(glm::radians(65.0f), aspect, 1.0f, 50000.0f);
+    return projection * view;
+}
+
+glm::mat4 ComputeMapViewProj(float seaCenterX, float seaCenterZ, float seaHalfExtent, float aspect, float panX,
+                              float panZ, float zoom) {
+    float centerX = seaCenterX + panX;
+    float centerZ = seaCenterZ + panZ;
+    glm::vec3 eye(centerX, 5000.0f, centerZ);
+    glm::vec3 target(centerX, 0.0f, centerZ);
+    // Looking straight down means (0,1,0) is degenerate as an "up" vector —
+    // use -Z instead, so +Z (south, matching every other camera's forward
+    // convention) reads as "down the screen," +X as "right."
+    glm::vec3 up(0.0f, 0.0f, -1.0f);
+    glm::mat4 view = glm::lookAt(eye, target, up);
+
+    // 1.05 margin so the coastline isn't flush with the screen edge at the
+    // default zoom (1.0).
+    float halfHeight = seaHalfExtent * 1.05f * zoom;
+    float halfWidth = halfHeight * aspect;
+    glm::mat4 projection = glm::ortho(-halfWidth, halfWidth, -halfHeight, halfHeight, 1.0f, 20000.0f);
     return projection * view;
 }
 

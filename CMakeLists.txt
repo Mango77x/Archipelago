@@ -20,6 +20,7 @@ add_executable(archipelago_sim
     src/save_load.cpp
     src/ship.cpp
     src/simulation.cpp
+    src/terrain.cpp
 )
 
 target_link_libraries(archipelago_sim PRIVATE

@@ -51,11 +51,15 @@ public:
 };
 
 // Fase 8.0 (Terreno procedural), paso 2: the flat Fase 7.1 seafloor becomes
-// a real heightfield — static collision body sampling Terrain::SeaFloorHeight
+// a real heightfield — static collision body sampling Terrain::Height
 // on a regular grid (sampleCount x sampleCount, must be a power of 2 —
 // Jolt's HeightFieldShape requirement) covering [centerX-halfExtentX,
 // centerX+halfExtentX] x [centerZ-halfExtentZ, centerZ+halfExtentZ].
+// offsetX/offsetZ shift the underlying noise sampling (see
+// Terrain::FindBiggestIslandOffset) so the biggest island lands at the
+// world's actual center, not wherever the seed happened to put it.
 JPH::BodyID CreateSeaFloorHeightFieldBody(JPH::BodyInterface& bodyInterface, float centerX, float centerZ,
-                                           float halfExtentX, float halfExtentZ, int sampleCount, uint32_t seed);
+                                           float halfExtentX, float halfExtentZ, int sampleCount, uint32_t seed,
+                                           float offsetX, float offsetZ);
 
 }  // namespace archipelago

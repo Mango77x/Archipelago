@@ -29,6 +29,7 @@
 #include "save_load.h"
 #include "ship.h"
 #include "simulation.h"
+#include "terrain.h"
 #include "weather.h"
 
 using namespace archipelago;
@@ -41,7 +42,10 @@ using namespace archipelago;
 // the save file so loading a save reproduces the same generated world.
 // Jolt's HeightFieldShape requires a power-of-2 sample count.
 constexpr uint32_t kWorldSeed = 42;
-constexpr int kTerrainSampleCount = 128;
+// Bumped 128->256 alongside the 4x world size increase, to keep roughly the
+// same physical resolution per grid cell instead of the collision heightmap
+// getting 4x coarser.
+constexpr int kTerrainSampleCount = 256;
 
 int main(int argc, char** argv) {
     (void)argc;
@@ -68,8 +72,20 @@ int main(int argc, char** argv) {
                         /*maxContactConstraints=*/1024, broadPhaseLayerInterface, objectVsBroadPhaseFilter,
                         objectLayerPairFilter);
     JPH::BodyInterface& bodyInterface = physicsSystem.GetBodyInterface();
+
+    // Fase 8.0 (Terreno procedural): find the biggest island wherever the
+    // seed naturally put it, then shift terrain sampling everywhere so it
+    // ends up centered on the world instead of scattered at random — a
+    // good, findable starting spot regardless of seed. Fase 8.0, paso 4:
+    // this same analysis also plants mina/aceria/puerto on that island's
+    // coast (see Terrain::ComputeWorldLayout) instead of using fixed
+    // coordinates that would now land on solid ground.
+    Terrain::WorldLayout worldLayout =
+        Terrain::ComputeWorldLayout(kWorldSeed, kSeaCenterX, kSeaCenterZ, kSeaHalfExtentX, kSeaHalfExtentZ);
+    Terrain::CenterOffset terrainOffset = worldLayout.offset;
+
     CreateSeaFloorHeightFieldBody(bodyInterface, kSeaCenterX, kSeaCenterZ, kSeaHalfExtentX, kSeaHalfExtentZ,
-                                   kTerrainSampleCount, kWorldSeed);
+                                   kTerrainSampleCount, kWorldSeed, terrainOffset.x, terrainOffset.z);
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
@@ -144,7 +160,9 @@ int main(int argc, char** argv) {
     GLint waterTimeLoc = glGetUniformLocation(waterShaderProgram, "uTime");
     GLint waterLightDirLoc = glGetUniformLocation(waterShaderProgram, "uLightDir");
 
-    constexpr int kWaterSegments = 200;
+    // Bumped 200->256 alongside the 4x world size increase, to keep roughly
+    // the same wave detail per unit area instead of getting 4x blurrier.
+    constexpr int kWaterSegments = 256;
     std::vector<float> waterVertices;
     std::vector<GLuint> waterIndices;
     GenerateWaterGrid(kSeaCenterX - kSeaHalfExtentX, kSeaCenterX + kSeaHalfExtentX, kSeaCenterZ - kSeaHalfExtentZ,
@@ -169,11 +187,13 @@ int main(int argc, char** argv) {
     // (unlike the water, terrain doesn't animate), so position+normal are
     // computed once on the CPU and uploaded, no dedicated shader needed
     // (reuses litShaderProgram set up below).
-    constexpr int kTerrainMeshSegments = 128;
+    // Bumped 128->256 alongside the 4x world size increase (see
+    // kTerrainSampleCount above — same reasoning, visual mesh this time).
+    constexpr int kTerrainMeshSegments = 256;
     std::vector<float> terrainVertices;
     std::vector<GLuint> terrainIndices;
     GenerateTerrainMesh(kSeaCenterX, kSeaCenterZ, kSeaHalfExtentX, kSeaHalfExtentZ, kTerrainMeshSegments, kWorldSeed,
-                        terrainVertices, terrainIndices);
+                        terrainOffset.x, terrainOffset.z, terrainVertices, terrainIndices);
     GLsizei terrainIndexCount = static_cast<GLsizei>(terrainIndices.size());
 
     GLuint terrainVao = 0, terrainVbo = 0, terrainEbo = 0;
@@ -224,12 +244,15 @@ int main(int argc, char** argv) {
     Economy aiEconomy(/*startingCash=*/2000.0);
     constexpr int kAiMaxShips = 5;
 
-    const Vec3 minePos{300, 0, 300};
-    const Vec3 island1Dock{450, 0, 300};
-    const Vec3 millPos{2200, 0, 450};
-    const Vec3 island2Dock{2350, 0, 450};
-    const Vec3 portPos{4300, 0, 150};
-    const Vec3 island3Dock{4450, 0, 150};
+    // Fase 8.0, paso 4: these used to be fixed coordinates picked by hand;
+    // now they come from where the generated terrain's biggest island
+    // actually has coastline (see worldLayout above).
+    const Vec3 minePos = worldLayout.mine.buildingPos;
+    const Vec3 island1Dock = worldLayout.mine.dockPos;
+    const Vec3 millPos = worldLayout.mill.buildingPos;
+    const Vec3 island2Dock = worldLayout.mill.dockPos;
+    const Vec3 portPos = worldLayout.port.buildingPos;
+    const Vec3 island3Dock = worldLayout.port.dockPos;
 
     std::vector<CargoShip> playerShips;
     playerShips.emplace_back(bodyInterface, CreateShipBody(bodyInterface, island2Dock), kShipCapacity,
@@ -243,6 +266,22 @@ int main(int argc, char** argv) {
 
     CameraMode cameraMode = CameraMode::ThirdPerson;
     bool cWasDown = false;
+    // Fase 8.0 (Terreno procedural): top-down map view, independent of
+    // cameraMode — toggling it doesn't change what ThirdPerson/FirstPerson
+    // will show once you leave the map.
+    bool showMap = false;
+    bool mWasDown = false;
+    // Map pan/zoom (X4-style: click-drag to pan, scroll wheel to zoom).
+    // panX/panZ offset the view center in world units; zoom scales the
+    // visible half-extent (1.0 = whole sea, <1 zoomed in, clamped so you
+    // can't zoom out past "already see it all" or in past a few dozen
+    // units). Persists across toggling the map off and on.
+    float mapPanX = 0.0f;
+    float mapPanZ = 0.0f;
+    float mapZoom = 1.0f;
+    bool mapDragging = false;
+    float lastMouseX = 0.0f;
+    float lastMouseY = 0.0f;
 
     Uint64 lastCounter = SDL_GetPerformanceCounter();
     const double frequency = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -273,6 +312,12 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL3_ProcessEvent(&event);
             if (event.type == SDL_EVENT_QUIT) running = false;
+            if (event.type == SDL_EVENT_MOUSE_WHEEL && showMap && !ImGui::GetIO().WantCaptureMouse) {
+                constexpr float kZoomStep = 0.1f;
+                constexpr float kMinZoom = 0.05f;
+                constexpr float kMaxZoom = 3.0f;
+                mapZoom = std::clamp(mapZoom - event.wheel.y * kZoomStep, kMinZoom, kMaxZoom);
+            }
         }
 
         Uint64 nowCounter = SDL_GetPerformanceCounter();
@@ -288,6 +333,38 @@ int main(int argc, char** argv) {
             cameraMode = (cameraMode == CameraMode::ThirdPerson) ? CameraMode::FirstPerson : CameraMode::ThirdPerson;
         }
         cWasDown = cIsDown;
+
+        bool mIsDown = keys[SDL_SCANCODE_M];
+        if (mIsDown && !mWasDown) {
+            showMap = !showMap;
+        }
+        mWasDown = mIsDown;
+
+        // Click-drag panning while the map is open — content follows the
+        // cursor (grab-the-map feel), not camera-follows-cursor.
+        float mouseX = 0.0f, mouseY = 0.0f;
+        SDL_MouseButtonFlags mouseButtons = SDL_GetMouseState(&mouseX, &mouseY);
+        bool leftMouseDown = (mouseButtons & SDL_BUTTON_LMASK) != 0;
+        if (showMap && leftMouseDown && !ImGui::GetIO().WantCaptureMouse) {
+            if (mapDragging) {
+                constexpr float kAspect = static_cast<float>(kWindowWidth) / static_cast<float>(kWindowHeight);
+                float halfHeight = kSeaHalfExtentX * 1.05f * mapZoom;
+                float halfWidth = halfHeight * kAspect;
+                float unitsPerPixelX = (2.0f * halfWidth) / static_cast<float>(kWindowWidth);
+                float unitsPerPixelZ = (2.0f * halfHeight) / static_cast<float>(kWindowHeight);
+                mapPanX -= (mouseX - lastMouseX) * unitsPerPixelX;
+                mapPanZ -= (mouseY - lastMouseY) * unitsPerPixelZ;
+                // Don't let the map wander off past roughly the sea's own
+                // bounds — you can pan to the edge, not into the void.
+                mapPanX = std::clamp(mapPanX, -kSeaHalfExtentX, kSeaHalfExtentX);
+                mapPanZ = std::clamp(mapPanZ, -kSeaHalfExtentZ, kSeaHalfExtentZ);
+            }
+            mapDragging = true;
+        } else {
+            mapDragging = false;
+        }
+        lastMouseX = mouseX;
+        lastMouseY = mouseY;
 
         bool f5IsDown = keys[SDL_SCANCODE_F5];
         if (f5IsDown && !f5WasDown) {
@@ -465,7 +542,9 @@ int main(int argc, char** argv) {
         }
 
         float aspect = static_cast<float>(kWindowWidth) / static_cast<float>(kWindowHeight);
-        glm::mat4 viewProj = ComputeViewProj(cameraMode, playerShips[0].position(), playerShips[0].heading(), aspect);
+        glm::mat4 viewProj =
+            showMap ? ComputeMapViewProj(kSeaCenterX, kSeaCenterZ, kSeaHalfExtentX, aspect, mapPanX, mapPanZ, mapZoom)
+                    : ComputeViewProj(cameraMode, playerShips[0].position(), playerShips[0].heading(), aspect);
 
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -493,8 +572,11 @@ int main(int argc, char** argv) {
 
         for (size_t i = 0; i < playerShips.size(); ++i) {
             const CargoShip& s = playerShips[i];
-            // Don't draw your own hull in first-person — you're standing inside it.
-            if (i == 0 && cameraMode == CameraMode::FirstPerson) continue;
+            // Don't draw your own hull in first-person — you're standing
+            // inside it. Doesn't apply in map view: showMap overrides the
+            // camera but leaves cameraMode itself untouched, and the map
+            // should always show your own ship's dot.
+            if (i == 0 && cameraMode == CameraMode::FirstPerson && !showMap) continue;
             // No +8 Y offset here anymore — that was needed pre-Fase 7.1,
             // back when the ship glided with no gravity/buoyancy and
             // position() was just a flat reference point. Now position() is
@@ -538,6 +620,7 @@ int main(int argc, char** argv) {
         ImGui::Text("Hora simulada: %d", hour);
         ImGui::Text("Camara: %s (tecla C para cambiar)",
                     cameraMode == CameraMode::ThirdPerson ? "tercera persona" : "primera persona");
+        ImGui::Text("Mapa: %s (tecla M para alternar)", showMap ? "activado" : "desactivado");
         Vec3 playerPos = playerShips[0].position();
         float windPercent = Weather::WindIntensity(playerPos.x, playerPos.z, waveTime) * 100.0f;
         ImGui::Text("Viento (aqui): %.0f%%", windPercent);

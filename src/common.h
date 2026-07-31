@@ -72,7 +72,12 @@ inline float HorizontalDistance(const Vec3& a, const Vec3& b) {
 // en el vault).
 constexpr float kSeaCenterX = 2500.0f;
 constexpr float kSeaCenterZ = 300.0f;
-constexpr float kSeaHalfExtentX = 10000.0f;
-constexpr float kSeaHalfExtentZ = 10000.0f;
+// Fase 8.0 (Terreno procedural): bumped 4x per axis (10000->40000, so the
+// full sea span goes from 20000x20000 to 80000x80000) once the map/pan/zoom
+// made a bigger world actually navigable — the existing 3 fixed islands sit
+// right around this center already, so they stay put near the middle of the
+// bigger world instead of needing to move.
+constexpr float kSeaHalfExtentX = 40000.0f;
+constexpr float kSeaHalfExtentZ = 40000.0f;
 
 }  // namespace archipelago

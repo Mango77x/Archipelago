@@ -65,14 +65,19 @@ void DrawDockRing(GLuint ringVao, GLuint ringVbo, GLint mvpLoc, GLint colorLoc, 
 // Fase 8.0 (Terreno procedural), paso 2/5: unlike the water grid, terrain
 // doesn't animate, so its mesh is fully computed once on the CPU (position
 // AND normal per vertex, normal via finite differences on
-// Terrain::SeaFloorHeight — that function is fBm noise, not a closed form
+// Terrain::Height — that function is fBm noise, not a closed form
 // like the wave field, so no clean analytic derivative the way the water
 // shader has). Same interleaved position+normal layout as kCubeVertices, so
 // it draws with the existing lit shader — no dedicated terrain shader
 // needed, just an identity model matrix since the mesh is already in world
 // space.
+// offsetX/offsetZ shift the underlying noise sampling (see
+// Terrain::FindBiggestIslandOffset) so the biggest island renders centered
+// on the world, matching where CreateSeaFloorHeightFieldBody puts its
+// collision.
 void GenerateTerrainMesh(float centerX, float centerZ, float halfExtentX, float halfExtentZ, int segments,
-                          uint32_t seed, std::vector<float>& outVertices, std::vector<GLuint>& outIndices);
+                          uint32_t seed, float offsetX, float offsetZ, std::vector<float>& outVertices,
+                          std::vector<GLuint>& outIndices);
 
 void DrawTerrain(GLuint terrainVao, GLsizei indexCount, GLint mvpLoc, GLint normalMatrixLoc, GLint colorLoc,
                   const glm::mat4& viewProj, float r, float g, float b);
@@ -85,6 +90,16 @@ enum class CameraMode { ThirdPerson, FirstPerson };
 // purpose — even though the hull itself pitches/rolls on waves (Fase 7.1),
 // the camera doesn't inherit that, so it doesn't feel seasick to watch.
 glm::mat4 ComputeViewProj(CameraMode mode, Vec3 shipPos, float heading, float aspect);
+
+// Fase 8.0 (Terreno procedural): top-down orthographic view of the whole sea
+// — reuses every existing draw call (terrain, water, ships, docks) as-is,
+// just seen from directly above with a different projection. No separate
+// baked map texture needed. seaHalfExtent assumes a square sea (X and Z
+// half-extents equal, true for kSeaHalfExtentX/Z). panX/panZ offset the
+// view center (world units, click-drag); zoom scales the visible half-
+// extent (<1 = zoomed in, >1 = zoomed out, scroll wheel).
+glm::mat4 ComputeMapViewProj(float seaCenterX, float seaCenterZ, float seaHalfExtent, float aspect, float panX,
+                              float panZ, float zoom);
 
 // Projects a world position through view*projection into screen pixel space,
 // for placing ImGui text labels over 3D objects. Returns false if the point

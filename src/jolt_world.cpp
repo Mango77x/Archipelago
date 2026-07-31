@@ -26,7 +26,8 @@ bool JoltObjectLayerPairFilter::ShouldCollide(JPH::ObjectLayer object1, JPH::Obj
 }
 
 JPH::BodyID CreateSeaFloorHeightFieldBody(JPH::BodyInterface& bodyInterface, float centerX, float centerZ,
-                                           float halfExtentX, float halfExtentZ, int sampleCount, uint32_t seed) {
+                                           float halfExtentX, float halfExtentZ, int sampleCount, uint32_t seed,
+                                           float offsetX, float offsetZ) {
     float minX = centerX - halfExtentX;
     float minZ = centerZ - halfExtentZ;
     float stepX = (2.0f * halfExtentX) / static_cast<float>(sampleCount - 1);
@@ -38,7 +39,7 @@ JPH::BodyID CreateSeaFloorHeightFieldBody(JPH::BodyInterface& bodyInterface, flo
         for (int col = 0; col < sampleCount; ++col) {
             float x = minX + stepX * static_cast<float>(col);
             samples[static_cast<size_t>(row) * static_cast<size_t>(sampleCount) + static_cast<size_t>(col)] =
-                Terrain::SeaFloorHeight(x, z, seed);
+                Terrain::Height(x - offsetX, z - offsetZ, seed);
         }
     }
 
