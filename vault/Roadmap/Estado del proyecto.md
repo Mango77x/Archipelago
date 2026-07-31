@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 2 - Economía|Fase 2]] — sin empezar.**
+**Fase actual: [[Fase 2 - Economía|Fase 2]] — en curso.**
 
 ## Fase 0 — cerrada
 
@@ -24,9 +24,14 @@ Definition of Done confirmada por el usuario ("un jugador nuevo entiende la cade
 
 Committeado y pusheado en git (`main`, repo en GitHub).
 
-## Siguiente paso
+## Fase 2 — progreso hasta ahora
 
-[[Fase 2 - Economía]] — precios, compra, venta, beneficio, gastos. Todavía sin empezar; falta desglosar el primer paso concreto cuando el usuario quiera arrancarla.
+Ver detalle completo en [[Fase 2 - Economía]]. Resumen: mercado de oferta/demanda de un solo bien (Acero) con precio que reacciona al ritmo de entrega del jugador, caja del jugador con gastos fijos de mantenimiento que corren siempre, guardado/carga y panel de ImGui extendidos. Probado por el usuario, pendiente de commit/push.
+
+## Pendiente para cerrar Fase 2
+
+- Confirmar con el usuario que el Definition of Done se cumple ("el jugador solo puede aumentar beneficios mejorando la logística") antes de dar la fase por cerrada.
+- Commit + push de este cambio.
 
 ## Decisiones de diseño añadidas durante Fase 1 (vigentes para cuando toque implementarlas)
 

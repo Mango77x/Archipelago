@@ -121,6 +121,83 @@ private:
     int totalExported_ = 0;
 };
 
+// Single-commodity supply/demand market for Steel. Selling adds to stock_
+// (a glut); Tick() absorbs stock at a fixed demand rate, and price recovers
+// toward basePrice_ as stock drains. Flood the market faster than demand
+// absorbs it and the price craters — the only lever Fase 2 gives the player
+// to raise profit is pacing deliveries to match demand, not just moving more.
+class Market {
+public:
+    Market(double basePrice, float demandPerHour, double sensitivity)
+        : basePrice_(basePrice), demandPerHour_(demandPerHour), sensitivity_(sensitivity) {}
+
+    double CurrentPrice() const {
+        double price = basePrice_ / (1.0 + stock_ * sensitivity_);
+        return std::max(price, basePrice_ * kMinPriceFraction);
+    }
+
+    double Sell(int amount) {
+        double revenue = CurrentPrice() * amount;
+        stock_ += amount;
+        totalRevenue_ += revenue;
+        totalSold_ += amount;
+        return revenue;
+    }
+
+    void Tick(int hour) {
+        float absorbed = std::min(stock_, demandPerHour_);
+        stock_ -= absorbed;
+        std::cout << "[hour " << hour << "] Market absorbed " << absorbed << " Steel (stock=" << stock_
+                   << ", price=$" << CurrentPrice() << "/unit)\n";
+    }
+
+    float stock() const { return stock_; }
+    double totalRevenue() const { return totalRevenue_; }
+    int totalSold() const { return totalSold_; }
+
+    void SetState(float stock, double totalRevenue, int totalSold) {
+        stock_ = stock;
+        totalRevenue_ = totalRevenue;
+        totalSold_ = totalSold;
+    }
+
+private:
+    static constexpr double kMinPriceFraction = 0.2;
+    double basePrice_;
+    float demandPerHour_;
+    double sensitivity_;
+    float stock_ = 0.0f;
+    double totalRevenue_ = 0.0;
+    int totalSold_ = 0;
+};
+
+// Player's cash balance. Revenue comes only from Market sales; expenses are
+// the fixed hourly upkeep of mine + mill + ship, charged whether or not the
+// ship is moving — so profit only grows by moving more Steel, faster, and
+// selling it without crashing the price. No scripted rewards, per Fase 2 DoD.
+class Economy {
+public:
+    explicit Economy(double startingCash) : cash_(startingCash) {}
+
+    void AddRevenue(double amount) { cash_ += amount; }
+    void ChargeExpense(double amount) {
+        cash_ -= amount;
+        totalExpenses_ += amount;
+    }
+
+    double cash() const { return cash_; }
+    double totalExpenses() const { return totalExpenses_; }
+
+    void SetState(double cash, double totalExpenses) {
+        cash_ = cash;
+        totalExpenses_ = totalExpenses;
+    }
+
+private:
+    double cash_;
+    double totalExpenses_ = 0.0;
+};
+
 struct Vec2 {
     float x = 0.0f;
     float y = 0.0f;
@@ -149,7 +226,8 @@ public:
         if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT]) angularVelocity_ += kTurnRate * dt;
     }
 
-    void Update(float dt, Warehouse& warehouse, Port& port, Vec2 millDock, Vec2 portDock) {
+    void Update(float dt, Warehouse& warehouse, Port& port, Market& market, Economy& economy, Vec2 millDock,
+                Vec2 portDock) {
         constexpr float kLinearDrag = 0.6f;
         constexpr float kAngularDrag = 0.85f;
         constexpr float kMaxSpeed = 160.0f;
@@ -179,8 +257,10 @@ public:
             }
         }
         if (Distance(position_, portDock) <= kDockRadius && cargo_ > 0) {
+            double revenue = market.Sell(cargo_);
+            economy.AddRevenue(revenue);
             port.Export(cargo_);
-            std::cout << "Cargo Ship unloaded " << cargo_ << " Steel\n";
+            std::cout << "Cargo Ship sold " << cargo_ << " Steel for $" << revenue << "\n";
             cargo_ = 0;
         }
     }
@@ -237,7 +317,8 @@ constexpr const char* kSaveFile = "archipelago_save.txt";
 constexpr const char* kSaveHeader = "ARCHIPELAGO_SAVE_V1";
 
 void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const SteelMill& mill,
-              const Warehouse& warehouse, const CargoShip& ship, const Port& port) {
+              const Warehouse& warehouse, const CargoShip& ship, const Port& port, const Market& market,
+              const Economy& economy) {
     std::ofstream out(kSaveFile);
     if (!out) {
         std::cerr << "SaveGame: could not open " << kSaveFile << " for writing\n";
@@ -253,11 +334,13 @@ void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const Stee
     out << port.totalExported() << "\n";
     out << pos.x << " " << pos.y << " " << vel.x << " " << vel.y << " " << ship.heading() << " "
         << ship.angularVelocity() << " " << ship.cargo() << "\n";
+    out << market.stock() << " " << market.totalRevenue() << " " << market.totalSold() << "\n";
+    out << economy.cash() << " " << economy.totalExpenses() << "\n";
     std::cout << "Game saved to " << kSaveFile << " (hour " << hour << ")\n";
 }
 
 bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mill, Warehouse& warehouse,
-              CargoShip& ship, Port& port) {
+              CargoShip& ship, Port& port, Market& market, Economy& economy) {
     std::ifstream in(kSaveFile);
     if (!in) {
         std::cerr << "LoadGame: could not open " << kSaveFile << "\n";
@@ -277,6 +360,10 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
     Vec2 pos{}, vel{};
     float heading = 0.0f, angularVelocity = 0.0f;
     int cargo = 0;
+    float marketStock = 0.0f;
+    double marketRevenue = 0.0;
+    int marketSold = 0;
+    double cash = 0.0, totalExpenses = 0.0;
 
     in >> hour >> hourAccumulator;
     in >> mineProduced;
@@ -284,6 +371,8 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
     in >> ironStock >> steelStock;
     in >> exported;
     in >> pos.x >> pos.y >> vel.x >> vel.y >> heading >> angularVelocity >> cargo;
+    in >> marketStock >> marketRevenue >> marketSold;
+    in >> cash >> totalExpenses;
 
     if (!in) {
         std::cerr << "LoadGame: save file is truncated or malformed\n";
@@ -296,6 +385,8 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
     warehouse.SetStock(Resource::Steel, steelStock);
     port.SetTotalExported(exported);
     ship.SetState(pos, vel, heading, angularVelocity, cargo);
+    market.SetState(marketStock, marketRevenue, marketSold);
+    economy.SetState(cash, totalExpenses);
 
     std::cout << "Game loaded from " << kSaveFile << " (hour " << hour << ")\n";
     return true;
@@ -404,7 +495,7 @@ int main(int argc, char** argv) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 
-    SDL_Window* window = SDL_CreateWindow("Archipelago - Fase 1", kWindowWidth, kWindowHeight, SDL_WINDOW_OPENGL);
+    SDL_Window* window = SDL_CreateWindow("Archipelago - Fase 2", kWindowWidth, kWindowHeight, SDL_WINDOW_OPENGL);
     if (!window) {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << "\n";
         return EXIT_FAILURE;
@@ -450,6 +541,9 @@ int main(int argc, char** argv) {
     IronMine mine(/*rate=*/10);
     SteelMill mill(/*consumeRate=*/10, /*outputRatioPercent=*/50);
     Port port;
+    Market market(/*basePrice=*/10.0, /*demandPerHour=*/12.0f, /*sensitivity=*/0.05);
+    Economy economy(/*startingCash=*/1000.0);
+    constexpr double kHourlyMaintenanceCost = 15.0;
 
     const Vec2 minePos{160, 360};
     const Vec2 warehousePos{340, 360};
@@ -486,14 +580,14 @@ int main(int argc, char** argv) {
 
         bool f5IsDown = keys[SDL_SCANCODE_F5];
         if (f5IsDown && !f5WasDown) {
-            SaveGame(hour, hourAccumulator, mine, mill, warehouse, ship, port);
+            SaveGame(hour, hourAccumulator, mine, mill, warehouse, ship, port, market, economy);
             lastSaveLoadMessage = "Guardado (hora " + std::to_string(hour) + ")";
         }
         f5WasDown = f5IsDown;
 
         bool f9IsDown = keys[SDL_SCANCODE_F9];
         if (f9IsDown && !f9WasDown) {
-            if (LoadGame(hour, hourAccumulator, mine, mill, warehouse, ship, port)) {
+            if (LoadGame(hour, hourAccumulator, mine, mill, warehouse, ship, port, market, economy)) {
                 lastSaveLoadMessage = "Cargado (hora " + std::to_string(hour) + ")";
             } else {
                 lastSaveLoadMessage = "Error al cargar (ver consola)";
@@ -502,7 +596,7 @@ int main(int argc, char** argv) {
         f9WasDown = f9IsDown;
 
         ship.HandleInput(keys, static_cast<float>(dt));
-        ship.Update(static_cast<float>(dt), warehouse, port, millDock, portDock);
+        ship.Update(static_cast<float>(dt), warehouse, port, market, economy, millDock, portDock);
 
         hourAccumulator += dt;
         while (hourAccumulator >= kSecondsPerSimulatedHour) {
@@ -510,6 +604,8 @@ int main(int argc, char** argv) {
             ++hour;
             mine.Tick(warehouse, hour);
             mill.Tick(warehouse, hour);
+            market.Tick(hour);
+            economy.ChargeExpense(kHourlyMaintenanceCost);
             if (!CheckMaterialBalance(mine, mill, warehouse, ship, port, hour)) {
                 running = false;
             }
@@ -549,6 +645,13 @@ int main(int argc, char** argv) {
         ImGui::Text("Hierro producido total: %d", mine.totalProduced());
         ImGui::Text("Acero producido total:  %d", mill.totalProduced());
         ImGui::Separator();
+        ImGui::Text("Caja: $%.2f", economy.cash());
+        ImGui::Text("Precio Acero: $%.2f/unidad", market.CurrentPrice());
+        ImGui::Text("Stock de mercado: %.1f", market.stock());
+        ImGui::Text("Ingresos totales: $%.2f", market.totalRevenue());
+        ImGui::Text("Gastos totales: $%.2f (mantenimiento $%.0f/hora)", economy.totalExpenses(),
+                    kHourlyMaintenanceCost);
+        ImGui::Separator();
         ImGui::Text("F5: guardar   F9: cargar");
         if (!lastSaveLoadMessage.empty()) {
             ImGui::Text("%s", lastSaveLoadMessage.c_str());
@@ -565,10 +668,13 @@ int main(int argc, char** argv) {
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
-    std::cout << "\n=== Fase 1 finished ===\n";
+    std::cout << "\n=== Simulation finished ===\n";
     std::cout << "Total Iron produced: " << mine.totalProduced() << "\n";
     std::cout << "Total Steel produced: " << mill.totalProduced() << "\n";
     std::cout << "Total Steel exported: " << port.totalExported() << "\n";
+    std::cout << "Total revenue: $" << market.totalRevenue() << "\n";
+    std::cout << "Total expenses: $" << economy.totalExpenses() << "\n";
+    std::cout << "Final cash: $" << economy.cash() << "\n";
 
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);
