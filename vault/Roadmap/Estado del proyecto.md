@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 7 - Entorno|Fase 7]] — sin empezar. ([[Fase 6 - Gobiernos|Fase 6]] aplazada.)**
+**Fase actual: [[Fase 7.0 - Motor de física real (Jolt)|Fase 7.0]] — en curso.** ([[Fase 6 - Gobiernos|Fase 6]] aplazada; el resto de [[Fase 7 - Entorno|Fase 7]] pausado hasta tener la física real construida — a petición del usuario.)
 
 ## Fase 0 — cerrada
 
@@ -50,7 +50,7 @@ Definition of Done confirmado por el usuario: "va mejorando su flota y ganando d
 
 ## Siguiente paso
 
-[[Fase 7 - Entorno]] — clima, tormentas, pesca, estaciones, demanda energética. Todavía sin desglosar en un primer paso concreto.
+[[Fase 7.0 - Motor de física real (Jolt)]] — en curso ahora mismo: añadir Jolt, validar con un cuerpo de prueba, migrar `CargoShip` a rigid body (sin oleaje todavía). Después vendrá Fase 7.1 (oleaje y boyantez de verdad), y solo entonces se retoma el resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones, demanda energética).
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 
