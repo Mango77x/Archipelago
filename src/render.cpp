@@ -144,6 +144,12 @@ GLuint CreateLitShaderProgram() {
 // The normal is the analytic derivative of the height field only (ignoring
 // the horizontal term's small effect on it) — an accepted approximation at
 // this steepness.
+//
+// Fase 7 (storms): each vertex also computes its own wind intensity from
+// its world (x,z) and uTime, mirroring weather.h's hash-based storm cells —
+// per-vertex, not a single uniform, so the mesh actually shows calm patches
+// and storm patches at the same time when a cell only covers part of the
+// visible sea.
 GLuint CreateWaterShaderProgram() {
     static const char* kVertexSrc = R"(
         #version 330 core
@@ -159,9 +165,89 @@ GLuint CreateWaterShaderProgram() {
         const float kSpeed[3] = float[3](9.0, 6.5, 11.0);
         const float kSteepness = 0.3;
 
+        // Mirrors Weather:: constants in weather.h.
+        const int kStormSlots = 2;
+        const float kCycleDuration = 1800.0;
+        const float kMinLifespan = 400.0;
+        const float kMaxLifespan = 600.0;
+        const float kMinRadius = 800.0;
+        const float kMaxRadius = 1500.0;
+        const float kMinPeakIntensity = 0.7;
+        const float kMaxPeakIntensity = 1.0;
+        const float kMinDriftSpeed = 2.0;
+        const float kMaxDriftSpeed = 5.0;
+        const float kSkipChance = 0.5;
+        const float kSeaCenterX = 2500.0;
+        const float kSeaCenterZ = 300.0;
+        const float kSeaHalfExtentX = 10000.0;
+        const float kSeaHalfExtentZ = 10000.0;
+
+        uint HashU32(uint x) {
+            x ^= x >> 16u;
+            x *= 0x7feb352du;
+            x ^= x >> 15u;
+            x *= 0x846ca68bu;
+            x ^= x >> 16u;
+            return x;
+        }
+
+        float HashToUnit(uint seed) {
+            return float(HashU32(seed)) * (1.0 / 4294967295.0);
+        }
+
+        float SmoothPulse(float u) {
+            float fadeIn = min(1.0, u / 0.2);
+            float fadeOut = min(1.0, (1.0 - u) / 0.2);
+            return clamp(min(fadeIn, fadeOut), 0.0, 1.0);
+        }
+
+        float SlotIntensity(int slot, float t, float x, float z) {
+            float cycleIndexF = floor(t / kCycleDuration);
+            float tInCycle = t - cycleIndexF * kCycleDuration;
+            uint seed = uint(slot) * 2654435761u + uint(cycleIndexF) * 40503u;
+            if (HashToUnit(seed) < kSkipChance) return 0.0;
+            float spawnX = kSeaCenterX + (HashToUnit(seed + 1u) * 2.0 - 1.0) * kSeaHalfExtentX;
+            float spawnZ = kSeaCenterZ + (HashToUnit(seed + 2u) * 2.0 - 1.0) * kSeaHalfExtentZ;
+            float angle = HashToUnit(seed + 3u) * 2.0 * 3.14159265359;
+            float dirX = cos(angle);
+            float dirZ = sin(angle);
+            float speed = kMinDriftSpeed + HashToUnit(seed + 4u) * (kMaxDriftSpeed - kMinDriftSpeed);
+            float radius = kMinRadius + HashToUnit(seed + 5u) * (kMaxRadius - kMinRadius);
+            float peak = kMinPeakIntensity + HashToUnit(seed + 6u) * (kMaxPeakIntensity - kMinPeakIntensity);
+            float lifespan = kMinLifespan + HashToUnit(seed + 7u) * (kMaxLifespan - kMinLifespan);
+            if (tInCycle > lifespan) return 0.0;
+            float envelope = SmoothPulse(tInCycle / lifespan);
+            float centerX = spawnX + dirX * speed * tInCycle;
+            float centerZ = spawnZ + dirZ * speed * tInCycle;
+            float dist = length(vec2(x - centerX, z - centerZ));
+            float falloff = 1.0 - clamp(dist / radius, 0.0, 1.0);
+            falloff = falloff * falloff * (3.0 - 2.0 * falloff);
+            return peak * envelope * falloff;
+        }
+
+        const float kAmbientMin = 0.1;
+        const float kAmbientMax = 0.35;
+
+        float AmbientWind(float t) {
+            float a = sin(6.28318530718 * t / 900.0 + 0.7);
+            float b = sin(6.28318530718 * t / 1400.0 + 2.3);
+            float raw = (a + b) * 0.5;
+            return kAmbientMin + (kAmbientMax - kAmbientMin) * 0.5 * (raw + 1.0);
+        }
+
+        float WindIntensity(float x, float z, float t) {
+            float total = AmbientWind(t);
+            for (int slot = 0; slot < kStormSlots; ++slot) {
+                total += SlotIntensity(slot, t, x, z);
+            }
+            return clamp(total, 0.0, 1.0);
+        }
+
         void main() {
             float x = aPos.x;
             float z = aPos.z;
+            float windIntensity = WindIntensity(x, z, uTime);
+            float ampScale = 0.05 + 2.0 * windIntensity;
             float h = 0.0;
             float dx = 0.0;
             float dz = 0.0;
@@ -174,11 +260,12 @@ GLuint CreateWaterShaderProgram() {
                 float phase = k * (dirX * x + dirZ * z) - kSpeed[i] * k * uTime;
                 float s = sin(phase);
                 float c = cos(phase);
-                h += kAmplitude[i] * s;
-                dx += kSteepness * kAmplitude[i] * dirX * c;
-                dz += kSteepness * kAmplitude[i] * dirZ * c;
-                dhdx += kAmplitude[i] * k * dirX * c;
-                dhdz += kAmplitude[i] * k * dirZ * c;
+                float amp = kAmplitude[i] * ampScale;
+                h += amp * s;
+                dx += kSteepness * amp * dirX * c;
+                dz += kSteepness * amp * dirZ * c;
+                dhdx += amp * k * dirX * c;
+                dhdz += amp * k * dirZ * c;
             }
             vNormal = normalize(vec3(-dhdx, 1.0, -dhdz));
             vec3 worldPos = vec3(x + dx, h, z + dz);

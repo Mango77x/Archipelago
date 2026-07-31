@@ -66,4 +66,13 @@ inline float HorizontalDistance(const Vec3& a, const Vec3& b) {
     return std::sqrt(dx * dx + dz * dz);
 }
 
+// Shared footprint for the water mesh, the seafloor beneath it, and (Fase
+// 7.1 storms) where storm cells are allowed to spawn — same area, generous
+// margin around all three islands (see "la distancia es parte del diseno"
+// en el vault).
+constexpr float kSeaCenterX = 2500.0f;
+constexpr float kSeaCenterZ = 300.0f;
+constexpr float kSeaHalfExtentX = 10000.0f;
+constexpr float kSeaHalfExtentZ = 10000.0f;
+
 }  // namespace archipelago

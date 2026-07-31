@@ -9,6 +9,7 @@
 
 #include "jolt_world.h"
 #include "waves.h"
+#include "weather.h"
 
 namespace archipelago {
 
@@ -58,6 +59,12 @@ void CargoShip::AutoPilot(Vec3 island1Dock, Vec3 island2Dock, Vec3 island3Dock) 
 void CargoShip::ApplyBuoyancy(float waveTime) {
     JPH::RVec3 centerOfMass = bodyInterface_->GetCenterOfMassPosition(bodyId_);
     JPH::Quat rotation = bodyInterface_->GetRotation(bodyId_);
+    // One wind-intensity sample for the whole hull (at its center), reused
+    // for all 4 corners — corners are close together relative to a storm
+    // cell's radius, so sampling per-corner wouldn't change anything
+    // meaningful and would just be 4x the work.
+    float windIntensity = Weather::WindIntensity(static_cast<float>(centerOfMass.GetX()),
+                                                  static_cast<float>(centerOfMass.GetZ()), waveTime);
     // Bottom-face corners in local (body) space — half-extents match the
     // box shape in CreateShipBody (24, 8, 12).
     constexpr float kHalfLength = 24.0f;
@@ -72,7 +79,7 @@ void CargoShip::ApplyBuoyancy(float waveTime) {
     for (const JPH::Vec3& localCorner : localCorners) {
         JPH::RVec3 cornerPos = centerOfMass + (rotation * localCorner);
         float waterHeight = Waves::Height(static_cast<float>(cornerPos.GetX()), static_cast<float>(cornerPos.GetZ()),
-                                           waveTime);
+                                           waveTime, windIntensity);
         float submersion = waterHeight - static_cast<float>(cornerPos.GetY());
         if (submersion <= 0.0f) continue;
         // Spring-only buoyancy (force proportional to depth alone) is an

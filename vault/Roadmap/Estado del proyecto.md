@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 7.1 - Oleaje y boyantez|Fase 7.1]] cerrada — siguiente es el resto de [[Fase 7 - Entorno|Fase 7]] o retomar economía.** ([[Fase 6 - Gobiernos|Fase 6]] aplazada.)
+**Fase actual: [[Fase 7.2 - Tormentas|Fase 7.2]] cerrada — siguiente es el resto de [[Fase 7 - Entorno|Fase 7]] (pesca, estaciones, demanda energética) o [[Fase 8 - Mundo procedural]].** ([[Fase 6 - Gobiernos|Fase 6]] aplazada.)
 
 ## Fase 0 — cerrada
 
@@ -60,9 +60,13 @@ Además, en respuesta a que el usuario abriera `main.cpp` y viera 1873 líneas m
 
 Dos ajustes más tras seguir jugando: (1) margen económico — el usuario iba "muy justo de dinero" con la IA compitiendo por el mismo Hierro/Acero/Mercado; se subió la conversión de la acería (50%→70%), la demanda del mercado (12→20/hora) y el precio mínimo (20%→35% del base); (2) los barcos se quedaban visualmente superpuestos al chocar entre sí pese a tener colisión habilitada — con el empuje de 400000N, 1 solo paso de colisión por tick no bastaba para separarlos; subido a 4 pasos. Ambos confirmados por el usuario.
 
+## Fase 7.2 — cerrada
+
+Definition of Done confirmada por el usuario jugando en directo. Ver detalle completo en [[Fase 7.2 - Tormentas]]. Resumen: viento como campo continuo (no interruptor calma/tormenta) — un ambiente permanente (10-35%, nunca 0% real) más células de tormenta que nacen, se desplazan en línea recta y se disipan del todo (deterministas, derivadas por hash del ciclo, no RNG en tiempo real), escalando la amplitud del oleaje ya existente hasta 2x en tormenta plena. De paso se corrigió un bug de render heredado de antes de tener boyantez real (el casco se dibujaba 8 unidades más alto de donde la física lo tenía, por eso el vaivén no coincidía con la ola visible). El usuario aceptó el resultado como "decente" sin más ajuste por ahora (el comportamiento algo errático de barcos IA en tormenta plena queda anotado, no bloqueante).
+
 ## Siguiente paso
 
-Resto de [[Fase 7 - Entorno]] (tormentas como oleaje extremo, pesca, estaciones, demanda energética) o [[Fase 8 - Mundo procedural]] — a decidir con el usuario.
+Resto de [[Fase 7 - Entorno]] (pesca, estaciones, demanda energética) o [[Fase 8 - Mundo procedural]] — a decidir con el usuario.
 
 ## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 

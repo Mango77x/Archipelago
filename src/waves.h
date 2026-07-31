@@ -32,14 +32,27 @@ constexpr Component kComponents[3] = {
 // Sum of sines, not full peaked-Gerstner displacement — good enough for
 // buoyancy sampling (the visual mesh adds the horizontal peak displacement
 // on top, see the vertex shader, without changing this height formula).
-inline float Height(float x, float z, float t) {
+//
+// windIntensity in [0,1] (see weather.h) scales the amplitude of every
+// component — near 0 gives a small residual ripple rather than a perfectly
+// flat mirror (still reads as water), 1 (full storm) gives waves ~2x taller
+// than kComponents' base amplitude. Tried 3.45x first: waves ended up taller
+// than the hull's own draft, and CargoShip::ApplyBuoyancy's one-sided spring
+// (zero force whenever a corner's above the local surface, never a downward
+// "suction") loses average restoring force once troughs regularly pop
+// corners out of the water — ships slowly sank in a full storm. 2x keeps
+// waves clearly dramatic without outgrowing what that model can hold up.
+// Wavelength/speed stay fixed regardless of wind: only how *tall* the
+// existing chop gets changes, not its shape or timing.
+inline float Height(float x, float z, float t, float windIntensity) {
+    float ampScale = 0.05f + 2.0f * windIntensity;
     float h = 0.0f;
     for (const Component& c : kComponents) {
         float k = 2.0f * kPi / c.wavelength;
         float dirX = std::cos(c.direction);
         float dirZ = std::sin(c.direction);
         float phase = k * (dirX * x + dirZ * z) - c.speed * k * t;
-        h += c.amplitude * std::sin(phase);
+        h += c.amplitude * ampScale * std::sin(phase);
     }
     return h;
 }

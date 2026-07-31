@@ -68,6 +68,7 @@ Este vault tiene dos partes que no deben confundirse:
 - [[Fase 6 - Gobiernos]]
 - [[Fase 7.0 - Motor de física real (Jolt)]]
 - [[Fase 7.1 - Oleaje y boyantez]]
+- [[Fase 7.2 - Tormentas]]
 - [[Fase 7 - Entorno]]
 - [[Fase 8 - Mundo procedural]]
 - [[Fase 9 - Seguridad]]

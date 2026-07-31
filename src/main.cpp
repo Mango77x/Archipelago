@@ -28,16 +28,13 @@
 #include "save_load.h"
 #include "ship.h"
 #include "simulation.h"
+#include "weather.h"
 
 using namespace archipelago;
 
-// Shared footprint for the water mesh and the seafloor beneath it — same
-// area, generous margin around all three islands (see "la distancia es
-// parte del diseno" en el vault).
-constexpr float kSeaCenterX = 2500.0f;
-constexpr float kSeaCenterZ = 300.0f;
-constexpr float kSeaHalfExtentX = 10000.0f;
-constexpr float kSeaHalfExtentZ = 10000.0f;
+// Sea footprint (kSeaCenterX/Z, kSeaHalfExtentX/Z) now lives in common.h —
+// shared with weather.h, which needs it to know where storm cells are
+// allowed to spawn.
 constexpr float kSeaFloorDepth = -250.0f;
 
 int main(int argc, char** argv) {
@@ -466,13 +463,20 @@ int main(int argc, char** argv) {
             const CargoShip& s = playerShips[i];
             // Don't draw your own hull in first-person — you're standing inside it.
             if (i == 0 && cameraMode == CameraMode::FirstPerson) continue;
-            DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, s.position() + Vec3{0, 8, 0},
-                    Vec3{48, 16, 24}, s.rotation(), 0.9f, 0.9f, 0.2f);
+            // No +8 Y offset here anymore — that was needed pre-Fase 7.1,
+            // back when the ship glided with no gravity/buoyancy and
+            // position() was just a flat reference point. Now position() is
+            // the real physics center of mass (same point ApplyBuoyancy's
+            // corners are offset from), so the rendered hull has to match it
+            // exactly or the visible bobbing stops lining up with the wave
+            // surface right under it.
+            DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, s.position(), Vec3{48, 16, 24},
+                    s.rotation(), 0.9f, 0.9f, 0.2f);
         }
         for (const CargoShip& s : aiShips) {
             // Rival AI hulls in a distinct reddish color so they read as "not yours" at a glance.
-            DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, s.position() + Vec3{0, 8, 0},
-                    Vec3{48, 16, 24}, s.rotation(), 0.85f, 0.25f, 0.2f);
+            DrawBox(cubeVao, litMvpLoc, litNormalMatrixLoc, litColorLoc, viewProj, s.position(), Vec3{48, 16, 24},
+                    s.rotation(), 0.85f, 0.25f, 0.2f);
         }
 
         glUseProgram(unlitShaderProgram);
@@ -502,6 +506,9 @@ int main(int argc, char** argv) {
         ImGui::Text("Hora simulada: %d", hour);
         ImGui::Text("Camara: %s (tecla C para cambiar)",
                     cameraMode == CameraMode::ThirdPerson ? "tercera persona" : "primera persona");
+        Vec3 playerPos = playerShips[0].position();
+        float windPercent = Weather::WindIntensity(playerPos.x, playerPos.z, waveTime) * 100.0f;
+        ImGui::Text("Viento (aqui): %.0f%%", windPercent);
         ImGui::Separator();
         ImGui::Text("Isla 1 (Minera) - Hierro: %d", island1Warehouse.Get(Resource::Iron));
         ImGui::Text("Isla 2 (Industrial) - Hierro: %d, Acero: %d", island2Warehouse.Get(Resource::Iron),
