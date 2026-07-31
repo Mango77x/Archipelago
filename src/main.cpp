@@ -305,8 +305,8 @@ public:
         JPH::Vec3 forward(std::cos(heading), 0.0f, std::sin(heading));
         if (thrustForward) bodyInterface_->AddForce(bodyId_, forward * kThrustForce);
         if (thrustBackward) bodyInterface_->AddForce(bodyId_, forward * -kThrustForce);
-        if (turnLeft) bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, -kTurnTorque, 0.0f));
-        if (turnRight) bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, kTurnTorque, 0.0f));
+        if (turnLeft) bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, kTurnTorque, 0.0f));
+        if (turnRight) bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, -kTurnTorque, 0.0f));
     }
 
     // Autonomous ships steer with the same thrust/torque model as the player
@@ -337,9 +337,9 @@ public:
         float angleDiff = NormalizeAngle(desiredHeading - heading);
 
         if (angleDiff > kAngleThreshold) {
-            bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, kTurnTorque, 0.0f));
-        } else if (angleDiff < -kAngleThreshold) {
             bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, -kTurnTorque, 0.0f));
+        } else if (angleDiff < -kAngleThreshold) {
+            bodyInterface_->AddTorque(bodyId_, JPH::Vec3(0.0f, kTurnTorque, 0.0f));
         }
 
         Vec3 vel = velocity();
@@ -447,11 +447,20 @@ public:
     }
 
 private:
-    static constexpr float kThrustForce = 45000.0f;
-    static constexpr float kTurnTorque = 400000.0f;
+    // Tuned so the thrust-vs-damping equilibrium speed (F / (mass * linearDamping),
+    // see CreateShipBody) lands near kMaxSpeed instead of far below it — the previous
+    // value gave an equilibrium of ~15 units/s, which read as "ridiculously slow"
+    // in testing even though kMaxSpeed allowed up to 160.
+    static constexpr float kThrustForce = 400000.0f;
+    // Scaled up from the original 400000 so turning keeps pace with the
+    // faster cruise speed (otherwise the ship's turning radius grows and it
+    // overshoots docks) — but 3200000 turned it into a spinning top, not a
+    // ship. This is a middle ground: still enough authority to line up on
+    // approach, but slow/heavy like a real hull, not twitchy.
+    static constexpr float kTurnTorque = 1000000.0f;
     static constexpr float kAngleThreshold = 0.15f;
     static constexpr float kThrustAngleLimit = 1.2f;
-    static constexpr float kBrakingDistance = 260.0f;
+    static constexpr float kBrakingDistance = 450.0f;
 
     float CurrentHeading() const {
         JPH::Vec3 forward = bodyInterface_->GetRotation(bodyId_) * JPH::Vec3::sAxisX();
