@@ -4,7 +4,7 @@ tags: [roadmap, estado]
 
 # Estado del proyecto
 
-**Fase actual: [[Fase 3 - Automatización|Fase 3]] — sin empezar.**
+**Fase actual: [[Fase 4 - Logística multi-isla|Fase 4]] — sin empezar.**
 
 ## Fase 0 — cerrada
 
@@ -28,14 +28,19 @@ Committeado y pusheado en git (`main`, repo en GitHub).
 
 Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 2 - Economía]]. Resumen: mercado de oferta/demanda de un solo bien (Acero) con precio que reacciona al ritmo de entrega del jugador, caja del jugador con gastos fijos de mantenimiento que corren siempre, guardado/carga y panel de ImGui extendidos. Committeado y pusheado en git (`main`, repo en GitHub).
 
+## Fase 3 — cerrada
+
+Definition of Done confirmada por el usuario. Ver detalle completo en [[Fase 3 - Automatización]]. Resumen: flota de barcos (el del jugador pilotable a mano, el resto autopilotado con el mismo modelo cinemático), compra de barcos ($500, con la simplificación anotada en [[Vehículos como producto económico]]), mantenimiento por barco, guardado/carga de toda la flota.
+
 ## Siguiente paso
 
-[[Fase 3 - Automatización]] — comprar barcos adicionales, asignar rutas y horarios, los barcos trabajan de forma autónoma. Todavía sin empezar; falta desglosar el primer paso concreto.
+[[Fase 4 - Logística multi-isla]] — múltiples islas, industrias, recursos y distancias de transporte distintas; el jugador debe optimizar rutas entre tres islas. Todavía sin empezar; falta desglosar el primer paso concreto. Recordar el checkpoint de Sistema de Replay antes de [[Fase 5 - Primera empresa de IA|Fase 5]] (ver [[Determinismo vs multithreading]]).
 
-## Decisiones de diseño añadidas durante Fase 1 (vigentes para cuando toque implementarlas)
+## Decisiones de diseño añadidas durante el desarrollo (vigentes para cuando toque implementarlas)
 
 - [[Encarnación y capa de mando]] — el jugador es un personaje físico en primera persona, no un cursor de gestión; coexiste con un mapa de mando estilo X4.
 - [[Vehículos como interfaz]] — roster completo (naval/aéreo/terrestre, civil/militar), no solo barcos.
 - [[Carga física - contenedores]] — el contenedor como única unidad físicamente interactuable, base de [[Fase 9 - Seguridad]].
+- [[Vehículos como producto económico]] — los vehículos son productos con productor propio; comprar barcos a facciones neutrales es una simplificación hasta que existan facciones/astilleros simulados de verdad.
 
-Ninguna de estas tres afecta el código actual de Fase 0/1 — son visión a largo plazo documentada para no perderla.
+Ninguna de estas afecta el código actual — son visión a largo plazo documentada para no perderla, salvo la última, que ya tiene una simplificación concreta implementada en Fase 3.

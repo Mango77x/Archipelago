@@ -13,12 +13,14 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace archipelago {
 
 constexpr int kWindowWidth = 1280;
 constexpr int kWindowHeight = 720;
 constexpr double kSecondsPerSimulatedHour = 2.0;
+constexpr float kPi = 3.14159265358979323846f;
 
 enum class Resource { Iron, Steel };
 
@@ -203,6 +205,14 @@ struct Vec2 {
     float y = 0.0f;
 };
 
+// Wraps an angle (radians) to (-pi, pi]. Used to find the shortest turn
+// direction toward a target heading.
+float NormalizeAngle(float angle) {
+    while (angle > kPi) angle -= 2.0f * kPi;
+    while (angle < -kPi) angle += 2.0f * kPi;
+    return angle;
+}
+
 // Player-piloted cargo ship: simple 2D kinematic model (thrust + drag + angular
 // inertia), not a physics engine — enough to feel like a boat without pulling
 // in Jolt before the gameplay actually needs collisions (see CLAUDE.md).
@@ -224,6 +234,37 @@ public:
         }
         if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT]) angularVelocity_ -= kTurnRate * dt;
         if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT]) angularVelocity_ += kTurnRate * dt;
+    }
+
+    // Autonomous ships steer with the same thrust/turn-rate model as the
+    // player (principle: the same rules apply, no special-cased movement for
+    // AI-controlled assets). Target is derived from cargo state: empty means
+    // "go load at the mill," carrying means "go sell at the port" — reuses
+    // the existing proximity-based load/unload logic in Update() untouched.
+    void AutoPilot(float dt, Vec2 millDock, Vec2 portDock) {
+        constexpr float kThrust = 220.0f;
+        constexpr float kTurnRate = 2.5f;
+        constexpr float kAngleThreshold = 0.15f;
+        constexpr float kThrustAngleLimit = 1.2f;
+
+        Vec2 target = (cargo_ <= 0) ? millDock : portDock;
+        float dx = target.x - position_.x;
+        float dy = target.y - position_.y;
+        if (std::sqrt(dx * dx + dy * dy) < 1.0f) return;
+
+        float desiredHeading = std::atan2(dy, dx);
+        float angleDiff = NormalizeAngle(desiredHeading - heading_);
+
+        if (angleDiff > kAngleThreshold) {
+            angularVelocity_ += kTurnRate * dt;
+        } else if (angleDiff < -kAngleThreshold) {
+            angularVelocity_ -= kTurnRate * dt;
+        }
+
+        if (std::abs(angleDiff) < kThrustAngleLimit) {
+            velocity_.x += std::cos(heading_) * kThrust * dt;
+            velocity_.y += std::sin(heading_) * kThrust * dt;
+        }
     }
 
     void Update(float dt, Warehouse& warehouse, Port& port, Market& market, Economy& economy, Vec2 millDock,
@@ -295,12 +336,16 @@ private:
 };
 
 // Invariant that must hold every simulated hour: every unit of Steel ever
-// produced is accounted for either in the warehouse, riding the ship, or
-// already exported. Phase 0's one failure mode to catch, still true in Phase 1.
+// produced is accounted for either in the warehouse, riding a ship, or
+// already exported. Phase 0's one failure mode to catch, still true with a
+// whole fleet in Phase 3.
 bool CheckMaterialBalance(const IronMine& mine, const SteelMill& mill, const Warehouse& warehouse,
-                           const CargoShip& ship, const Port& port, int hour) {
+                           const std::vector<CargoShip>& ships, const Port& port, int hour) {
+    int cargoAfloat = 0;
+    for (const CargoShip& s : ships) cargoAfloat += s.cargo();
+
     int ironBalance = mine.totalProduced() - mill.totalConsumed() - warehouse.Get(Resource::Iron);
-    int steelBalance = mill.totalProduced() - warehouse.Get(Resource::Steel) - ship.cargo() - port.totalExported();
+    int steelBalance = mill.totalProduced() - warehouse.Get(Resource::Steel) - cargoAfloat - port.totalExported();
 
     if (ironBalance != 0 || steelBalance != 0) {
         std::cerr << "[hour " << hour << "] BALANCE VIOLATION: ironBalance=" << ironBalance
@@ -317,30 +362,34 @@ constexpr const char* kSaveFile = "archipelago_save.txt";
 constexpr const char* kSaveHeader = "ARCHIPELAGO_SAVE_V1";
 
 void SaveGame(int hour, double hourAccumulator, const IronMine& mine, const SteelMill& mill,
-              const Warehouse& warehouse, const CargoShip& ship, const Port& port, const Market& market,
-              const Economy& economy) {
+              const Warehouse& warehouse, const std::vector<CargoShip>& ships, const Port& port,
+              const Market& market, const Economy& economy) {
     std::ofstream out(kSaveFile);
     if (!out) {
         std::cerr << "SaveGame: could not open " << kSaveFile << " for writing\n";
         return;
     }
-    Vec2 pos = ship.position();
-    Vec2 vel = ship.velocity();
     out << kSaveHeader << "\n";
     out << hour << " " << hourAccumulator << "\n";
     out << mine.totalProduced() << "\n";
     out << mill.totalConsumed() << " " << mill.totalProduced() << " " << (mill.isIdle() ? 1 : 0) << "\n";
     out << warehouse.Get(Resource::Iron) << " " << warehouse.Get(Resource::Steel) << "\n";
     out << port.totalExported() << "\n";
-    out << pos.x << " " << pos.y << " " << vel.x << " " << vel.y << " " << ship.heading() << " "
-        << ship.angularVelocity() << " " << ship.cargo() << "\n";
     out << market.stock() << " " << market.totalRevenue() << " " << market.totalSold() << "\n";
     out << economy.cash() << " " << economy.totalExpenses() << "\n";
-    std::cout << "Game saved to " << kSaveFile << " (hour " << hour << ")\n";
+    out << ships.size() << "\n";
+    for (const CargoShip& s : ships) {
+        Vec2 pos = s.position();
+        Vec2 vel = s.velocity();
+        out << pos.x << " " << pos.y << " " << vel.x << " " << vel.y << " " << s.heading() << " "
+            << s.angularVelocity() << " " << s.cargo() << "\n";
+    }
+    std::cout << "Game saved to " << kSaveFile << " (hour " << hour << ", " << ships.size() << " ships)\n";
 }
 
 bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mill, Warehouse& warehouse,
-              CargoShip& ship, Port& port, Market& market, Economy& economy) {
+              std::vector<CargoShip>& ships, Port& port, Market& market, Economy& economy, int shipCapacity,
+              Vec2 defaultSpawn) {
     std::ifstream in(kSaveFile);
     if (!in) {
         std::cerr << "LoadGame: could not open " << kSaveFile << "\n";
@@ -357,24 +406,33 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
     int millConsumed = 0, millProduced = 0, millIdleFlag = 0;
     int ironStock = 0, steelStock = 0;
     int exported = 0;
-    Vec2 pos{}, vel{};
-    float heading = 0.0f, angularVelocity = 0.0f;
-    int cargo = 0;
     float marketStock = 0.0f;
     double marketRevenue = 0.0;
     int marketSold = 0;
     double cash = 0.0, totalExpenses = 0.0;
+    size_t shipCount = 0;
 
     in >> hour >> hourAccumulator;
     in >> mineProduced;
     in >> millConsumed >> millProduced >> millIdleFlag;
     in >> ironStock >> steelStock;
     in >> exported;
-    in >> pos.x >> pos.y >> vel.x >> vel.y >> heading >> angularVelocity >> cargo;
     in >> marketStock >> marketRevenue >> marketSold;
     in >> cash >> totalExpenses;
+    in >> shipCount;
 
-    if (!in) {
+    std::vector<CargoShip> loadedShips;
+    for (size_t i = 0; i < shipCount && in; ++i) {
+        Vec2 pos{}, vel{};
+        float heading = 0.0f, angularVelocity = 0.0f;
+        int cargo = 0;
+        in >> pos.x >> pos.y >> vel.x >> vel.y >> heading >> angularVelocity >> cargo;
+        CargoShip s(shipCapacity, defaultSpawn);
+        s.SetState(pos, vel, heading, angularVelocity, cargo);
+        loadedShips.push_back(s);
+    }
+
+    if (!in || loadedShips.size() != shipCount) {
         std::cerr << "LoadGame: save file is truncated or malformed\n";
         return false;
     }
@@ -384,11 +442,11 @@ bool LoadGame(int& hour, double& hourAccumulator, IronMine& mine, SteelMill& mil
     warehouse.SetStock(Resource::Iron, ironStock);
     warehouse.SetStock(Resource::Steel, steelStock);
     port.SetTotalExported(exported);
-    ship.SetState(pos, vel, heading, angularVelocity, cargo);
     market.SetState(marketStock, marketRevenue, marketSold);
     economy.SetState(cash, totalExpenses);
+    ships = std::move(loadedShips);
 
-    std::cout << "Game loaded from " << kSaveFile << " (hour " << hour << ")\n";
+    std::cout << "Game loaded from " << kSaveFile << " (hour " << hour << ", " << ships.size() << " ships)\n";
     return true;
 }
 
@@ -543,7 +601,10 @@ int main(int argc, char** argv) {
     Port port;
     Market market(/*basePrice=*/10.0, /*demandPerHour=*/12.0f, /*sensitivity=*/0.05);
     Economy economy(/*startingCash=*/1000.0);
-    constexpr double kHourlyMaintenanceCost = 15.0;
+    constexpr double kBaseMaintenanceCost = 5.0;    // mine + mill upkeep, independent of fleet size
+    constexpr double kPerShipMaintenanceCost = 10.0;  // each ship (player's included) adds its own upkeep
+    constexpr double kShipPurchaseCost = 500.0;
+    constexpr int kShipCapacity = 20;
 
     const Vec2 minePos{160, 360};
     const Vec2 warehousePos{340, 360};
@@ -552,7 +613,8 @@ int main(int argc, char** argv) {
     const Vec2 portPos{1100, 360};
     const Vec2 portDock{1000, 360};
 
-    CargoShip ship(/*capacity=*/20, /*startPos=*/millDock);
+    std::vector<CargoShip> ships;
+    ships.emplace_back(kShipCapacity, millDock);
 
     Uint64 lastCounter = SDL_GetPerformanceCounter();
     const double frequency = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -580,14 +642,15 @@ int main(int argc, char** argv) {
 
         bool f5IsDown = keys[SDL_SCANCODE_F5];
         if (f5IsDown && !f5WasDown) {
-            SaveGame(hour, hourAccumulator, mine, mill, warehouse, ship, port, market, economy);
+            SaveGame(hour, hourAccumulator, mine, mill, warehouse, ships, port, market, economy);
             lastSaveLoadMessage = "Guardado (hora " + std::to_string(hour) + ")";
         }
         f5WasDown = f5IsDown;
 
         bool f9IsDown = keys[SDL_SCANCODE_F9];
         if (f9IsDown && !f9WasDown) {
-            if (LoadGame(hour, hourAccumulator, mine, mill, warehouse, ship, port, market, economy)) {
+            if (LoadGame(hour, hourAccumulator, mine, mill, warehouse, ships, port, market, economy, kShipCapacity,
+                         millDock)) {
                 lastSaveLoadMessage = "Cargado (hora " + std::to_string(hour) + ")";
             } else {
                 lastSaveLoadMessage = "Error al cargar (ver consola)";
@@ -595,8 +658,16 @@ int main(int argc, char** argv) {
         }
         f9WasDown = f9IsDown;
 
-        ship.HandleInput(keys, static_cast<float>(dt));
-        ship.Update(static_cast<float>(dt), warehouse, port, market, economy, millDock, portDock);
+        // Ship 0 is always the player's — you're one person, you can only
+        // pilot one hull at a time (see "Encarnación y capa de mando" in the
+        // vault). Every other ship in the fleet runs on autopilot.
+        ships[0].HandleInput(keys, static_cast<float>(dt));
+        for (size_t i = 1; i < ships.size(); ++i) {
+            ships[i].AutoPilot(static_cast<float>(dt), millDock, portDock);
+        }
+        for (CargoShip& s : ships) {
+            s.Update(static_cast<float>(dt), warehouse, port, market, economy, millDock, portDock);
+        }
 
         hourAccumulator += dt;
         while (hourAccumulator >= kSecondsPerSimulatedHour) {
@@ -605,8 +676,9 @@ int main(int argc, char** argv) {
             mine.Tick(warehouse, hour);
             mill.Tick(warehouse, hour);
             market.Tick(hour);
-            economy.ChargeExpense(kHourlyMaintenanceCost);
-            if (!CheckMaterialBalance(mine, mill, warehouse, ship, port, hour)) {
+            double maintenance = kBaseMaintenanceCost + kPerShipMaintenanceCost * static_cast<double>(ships.size());
+            economy.ChargeExpense(maintenance);
+            if (!CheckMaterialBalance(mine, mill, warehouse, ships, port, hour)) {
                 running = false;
             }
         }
@@ -618,7 +690,9 @@ int main(int argc, char** argv) {
         DrawQuad(vao, vbo, warehousePos, 50, 40, 0.85f, 0.75f, 0.2f, colorLoc);
         DrawQuad(vao, vbo, millPos, 60, 40, 0.5f, 0.5f, 0.55f, colorLoc);
         DrawQuad(vao, vbo, portPos, 60, 40, 0.2f, 0.4f, 0.8f, colorLoc);
-        DrawShipTriangle(vao, vbo, ship.position(), ship.heading(), 24.0f, colorLoc);
+        for (const CargoShip& s : ships) {
+            DrawShipTriangle(vao, vbo, s.position(), s.heading(), 24.0f, colorLoc);
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
@@ -639,7 +713,7 @@ int main(int argc, char** argv) {
         ImGui::Text("Almacen - Acero:  %d", warehouse.Get(Resource::Steel));
         ImGui::Text("Aceria: %s", mill.isIdle() ? "PARADA (sin Hierro)" : "activa");
         ImGui::Separator();
-        ImGui::Text("Barco - carga: %d", ship.cargo());
+        ImGui::Text("Tu barco - carga: %d", ships[0].cargo());
         ImGui::Text("Puerto - exportado total: %d", port.totalExported());
         ImGui::Separator();
         ImGui::Text("Hierro producido total: %d", mine.totalProduced());
@@ -649,8 +723,19 @@ int main(int argc, char** argv) {
         ImGui::Text("Precio Acero: $%.2f/unidad", market.CurrentPrice());
         ImGui::Text("Stock de mercado: %.1f", market.stock());
         ImGui::Text("Ingresos totales: $%.2f", market.totalRevenue());
-        ImGui::Text("Gastos totales: $%.2f (mantenimiento $%.0f/hora)", economy.totalExpenses(),
-                    kHourlyMaintenanceCost);
+        double currentMaintenance = kBaseMaintenanceCost + kPerShipMaintenanceCost * static_cast<double>(ships.size());
+        ImGui::Text("Gastos totales: $%.2f (mantenimiento $%.0f/hora con %zu barco%s)", economy.totalExpenses(),
+                    currentMaintenance, ships.size(), ships.size() == 1 ? "" : "s");
+        ImGui::Separator();
+        ImGui::Text("Flota: %zu barco%s (autopilotados todos salvo el tuyo)", ships.size(),
+                    ships.size() == 1 ? "" : "s");
+        ImGui::BeginDisabled(economy.cash() < kShipPurchaseCost);
+        if (ImGui::Button("Comprar barco a una faccion neutral ($500)")) {
+            ships.emplace_back(kShipCapacity, millDock);
+            economy.ChargeExpense(kShipPurchaseCost);
+            lastSaveLoadMessage = "";
+        }
+        ImGui::EndDisabled();
         ImGui::Separator();
         ImGui::Text("F5: guardar   F9: cargar");
         if (!lastSaveLoadMessage.empty()) {

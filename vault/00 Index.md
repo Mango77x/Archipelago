@@ -27,6 +27,7 @@ Este vault tiene dos partes que no deben confundirse:
 ## Economía
 - [[Economía]]
 - [[Carga física - contenedores]]
+- [[Vehículos como producto económico]]
 
 ## Mundo
 - [[Industria, transporte, IA, guerra, escala]]
